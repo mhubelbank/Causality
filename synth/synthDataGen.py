@@ -246,7 +246,11 @@ if __name__ == '__main__':
 		datacount = eval(sys.argv[2])
 	else:
 		datacount = 1000
+	print('Generating data for model = ', filename)
+	print ('SEM = ', getSEM())
 	#print('filename, datacount = ', filename, datacount)
 	if filename is not None:
-		run(filename, samples=datacount, maxDifficulty=10.0)
-	print ('SEM = ', getSEM())
+		run(filename, samples=datacount, maxDifficulty=0)
+	print('Generated ', datacount, 'records.')
+
+	

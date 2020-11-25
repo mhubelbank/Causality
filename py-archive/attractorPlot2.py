@@ -8,7 +8,7 @@ import sys
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import standardize
 
-TAU = 5
+TAU = 1
 
 standard = True
 

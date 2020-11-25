@@ -1,12 +1,27 @@
 # ----------------------------------------------------------------------------
-# SEM Definitions
-#
+# Model Definition
+# ----------------------------------------------------------------------------
 
+# Initialize any variables here
 t = 0
-testDescript = 'Reference Model M5'
 
-varNames = ['A', 'B', 'C', 'D', 'E']
+# Describe the test
+testDescript = 'Reference Model M4'
 
+# Define the causal model.
+# Each random variable has the following fields:
+# - Name
+# - List of Parents
+# - isObserved (Optional, default True)
+# - Data Type (Optional, default 'Numeric')
+model = [   ('B', []),
+			('A' , ['B']),
+			('C', ['B', 'D']),
+            ('D', ['A']),
+            ('E', ['C'])
+		]
+
+# Structural Equation Model for data generation
 varEquations = [
 			    'B = math.sin((t % 365) / 365 * 6.28) * 50 + 40 + normal(0, 5)',
 			    'A =  = .5 * B + normal(0,5)',
@@ -15,10 +30,3 @@ varEquations = [
                 'E = .5 * C + normal(0,3)',
                 't = t + 1'
 		        ]
-				
-model = [   ('B', []),
-			('A' , ['B']),
-			('C', ['B', 'D']),
-            ('D', ['A']),
-            ('E', ['C'])
-		]

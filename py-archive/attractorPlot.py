@@ -8,7 +8,7 @@ import sys
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import standardize
 
-TAU = 3
+TAU = 10
 
 standard = True
 
@@ -58,18 +58,19 @@ def run(dataDefFile, var1, var2, datapoints):
 		X1 = var1D[:-2*tau]
 		Y1 = var1D[tau:-tau]
 		Z1 = var1D[2*tau:]
-
-		var2D = d.getSeries(var2)
-		if standard:
-			var2D = standardize.standardize(var2D)
-		X2 = var2D[:-2*tau]
-		Y2 = var2D[tau:-tau]
-		Z2 = var2D[2*tau:]
+		if var2:
+			var2D = d.getSeries(var2)
+			if standard:
+				var2D = standardize.standardize(var2D)
+			X2 = var2D[:-2*tau]
+			Y2 = var2D[tau:-tau]
+			Z2 = var2D[2*tau:]
 		
 		#plotData(d, datapoints)
-		ax.plot(X1,Y1,Z1)
-		ax.plot(X2,Y2,Z2, 'r')
-		ax.plot(X1, Y1, Z2, 'g')
+		ax.plot(X1,Y1,Z1, 'r')
+		if var2:
+			ax.plot(X2,Y2,Z2, 'b')
+			ax.plot(X1, Y1, Y2, 'g')
 	
 	# `ax` is a 3D-aware axis instance because of the projection='3d' keyword argument to add_subplot
 	#ax = fig.add_subplot(1, 2, 1, projection='3d')
@@ -148,16 +149,14 @@ def scalePdf(series):
 dataGenFile = sys.argv[1]
 datacount = 1000
 
-if len(sys.argv) > 3:
+if len(sys.argv) >= 3:
 	var1 = sys.argv[2]
+if len(sys.argv) >= 4:
 	var2 = sys.argv[3]
-	if len(sys.argv) > 4:
-		datacount = int(sys.argv[4])
 else:
-	var1 = None
 	var2 = None
-	if len(sys.argv) > 2:
-		datacount = int(sys.argv[2])
-#print('File = ', dataGenFile)
+if len(sys.argv) > 4:
+	datacount = int(sys.argv[4])
+
 
 run(dataGenFile, var1, var2, datacount)

@@ -1,6 +1,7 @@
 import networkx
 import math
-
+import independence
+VERBOSE = 1
 # rvList is a list of random variable (rv) objects
 # data is a dictionary keyed by random variable name, containing a list of observed values.
 #   Each variable's list should be the same length
@@ -49,11 +50,11 @@ class cGraph:
                 c.append((u, v))
         return c
 
-    def makeDependency(self, node, isDep, u, v, w):
+    def makeDependency(self, u, v, w, isDep):
         if u < v:
-            d = (node, isDep, u, v, w)
+            d = (u, v, w, isDep)
         else:
-            d = (node, isDep, v, u, w)
+            d = (v, u, w, isDep)
         return d
 
     def calcNDependencies(self, order, n=0):
@@ -87,133 +88,103 @@ class cGraph:
         cNodes = self.getCombinations(nodes, order)
         for i in range(len(nodes)):
             node1 = nodes[i]
+            if not self.rvDict[node1].isObserved:
+                continue
             for j in range(i, len(nodes)):
                 node2 = nodes[j]
-                if node1 == node2:
+                if node1 == node2 or not self.rvDict[node2].isObserved:
                     continue
                 isSeparated = networkx.d_separated(self.g, {node1}, {node2}, {})
-                dep = self.makeDependency(None, not isSeparated, node1, node2, None)
+                dep = self.makeDependency(node1, node2, None, not isSeparated)
                 deps.append(dep)
                 for c in cNodes:
                     if node1 in c or node2 in c:
                         continue
+                    # Verify that every member of c is observed.  If not, we skip this combo.
+                    allObserved = True
+                    for m in c:
+                        if not self.rvDict[m].isObserved:
+                            allObserved = False
+                            break
+                    if not allObserved:
+                        continue
                     isSeparated = networkx.d_separated(self.g, {node1}, {node2}, set(c))
-                    dep = self.makeDependency(None, not isSeparated, node1, node2, c)
+                    dep = self.makeDependency(node1, node2, c, not isSeparated)
                     deps.append(dep)
         return deps
-                   
-                    
-    def computeDependenciesOld(self):
-        # dependencies := [(isDependent, u, v, w)]
-        deps = []
-        for node1 in self.g.nodes():
-            edges = self.getAdjacencies(node)
-            inbound = []
-            outbound = []
-            for edge in edges:
-                s, d = edge
-                if s == node:
-                    outbound.append(d)
-                else:
-                    inbound.append(s)
-            if inbound and not outbound:
-                combos = self.combinations(inbound)
-                for neighbor in inbound:
-                    deps.append(self.makeDependency(node, True, node, neighbor, None))
-                for c in combos:
-                    u, v = c
-                    deps.append(self.makeDependency(node, False, u, v, None))
-                    deps.append(self.makeDependency(node, True, u, v, node))
-            elif outbound and not inbound:
-                combos = self.combinations(outbound)
-                for neighbor in outbound:
-                    deps.append(self.makeDependency(node, True, node, neighbor, None))
-                for c in combos:
-                    u, v = c
-                    deps.append(self.makeDependency(node, True, u, v, None))
-                    deps.append(self.makeDependency(node, False, u, v, node))
-            elif outbound and inbound:
-                for neighbor in inbound:
-                    deps.append(self.makeDependency(node, True, node, neighbor, None))
-                for neighbor in outbound:
-                    deps.append(self.makeDependency(node, True, node, neighbor, None))
-                iCombos = self.combinations(inbound)
-                for c in iCombos:
-                    u, v = c
-                    deps.append(self.makeDependency(node, False, u, v, None))
-                    deps.append(self.makeDependency(node, True, u, v, node))
-                oCombos = self.combinations(outbound)
-                for c in oCombos:
-                    u, v = c
-                    deps.append(self.makeDependency(node, True, u, v, None))
-                    deps.append(self.makeDependency(node, False, u, v, node))
-                for i in inbound:
-                    for j in outbound:
-                        deps.append(self.makeDependency(node, False, i, j, node))
-            else:
-                # No neighbors
-                pass
-            # Now reduce the local dependency lists
-            depDict = {}
-            condDepDict = {}
-            indDict = {}
-            condIndDict = {}
-            outDeps = []
-            for d in deps:
-                node, isDep, u, v, w = d
-                if w is None:
-                    # Non conditional
-                    if isDep:
-                        depDict[(u, v)] = d
-                    else:
-                        indDict[(u, v)] = d
-                else:
-                    if isDep:
-                        condDepDict[(u, v, w)] = d
-                    else:
-                        condIndDict[(u, v, w)] = d
-            # Dedup any recods by reconstituting from dictoinary
-            deps = list(depDict.values()) + list(indDict.values()) + list(condDepDict.values()) + list(condIndDict.values())
-            for d in deps:
-                node, isDep, u, v, w = d
-                if w is None:
-                    # Non conditional
-                    if isDep:
-                        outDeps.append(d)
-                    elif (u, v) not in depDict.keys():
-                        outDeps.append(d)
-                else:
-                    if isDep:
-                        outDeps.append(d)
-                        #if (u, v) in depDict.keys():
-                            # If there is a direct dependency between u and v, then invert the conditional rule
-                            #d = (node, False, u, v, w)
-                    elif (u, v, w) not in condDepDict.keys():
-                        #if (u, v) in depDict.keys():
-                            # If there is a direct dependency between u and v, then invert the conditional rule
-                        #    d = (node, True, u, v, w)
-                        outDeps.append(d)
-        
-        return outDeps
+    
+    def formatDependency(self, dep):
+        # dep is:  from, to, given, isDependent
+        u, v, w, isDep = dep
+        if isDep:
+            rel = 'is not independent from'
+        else:
+            rel = 'is independent from'
+        if w is None:
+            given = ''
+        else:
+            given = 'given ' + str(w)
+        out = u + ' ' + rel + ' ' + v + ' ' + given
+        return out
 
     def printDependencies(self, deps):
         print('Implied Dependencies:\n')
         for d in deps:
-            node, isDep, u, v, w = d
-            if isDep:
-                rel = 'is not independent from'
-            else:
-                rel = 'is independent from'
-            if w is None:
-                given = ''
-            else:
-                given = 'given ' + str(w)
-            
-            print(u, rel, v, given)
+            print(self.formatDependency(d))
 
-    def testModel(self):
-        d = self.computeDependencies()
-        return d      
+    # Test the model for consistency with a set of data.
+    # Format for data is {variableName: [variable value]}.
+    # That is, a dictionary keyed by variable name, containing
+    # a list of data values for that variable's series.
+    # The lengths of all variable's lists should match.
+    # That is, the number of samples for each variable must
+    # be the same. 
+    # Returns [(errType, x, y, z, isDep, errStr)]
+    # Where errType = 1 (Expected ndependence not observed) or 
+    #                   2 (Expected dependence not observed)
+    #       x, y, z are each a list of variable names that
+    #               comprise the statement x _||_ y | z.
+    #               That is x is independent of y given z.
+    #       isDep True if a dependence is expected.  False for 
+    #               independence
+    #       pval -- The p-val returned from the independence test
+    #       errStr A human readable error string describing the error
+    #
+    def TestModel(self, data, order=3):
+        errors = []
+        deps = self.computeDependencies(order)
+        if VERBOSE:
+            print('Testing Model for', len(deps), 'Independencies')
+        for dep in deps:
+            x, y, zlist, isDep = dep
+            X = data[x]
+            Y = data[y]
+            #print('X = ', X)
+            #print('Y = ', Y)
+            Z = []
+            if zlist:
+                for z in zlist:
+                    zdat = data[z]
+                    Z.append(zdat)
+                pval = independence.test([X], [Y], Z)
+            else:
+                pval = independence.test([X], [Y])
+            errType = 0
+            if isDep and pval > .1:
+                errStr = 'Warning (Type 2) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
+                errType = 2
+            elif not isDep and pval < .1:
+                errStr = 'Error (Type 1) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+                errType = 1
+            if errType:
+                if VERBOSE:
+                    print('***', errStr)
+                errors.append((errType, [x], [y], list(zlist), isDep, pval, errStr))
+            elif VERBOSE:
+                print('.',)
+        if VERBOSE:
+            print('Model Testing Completed with', len(errors), 'error(s).')
+        return errors
         
 
 

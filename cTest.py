@@ -40,30 +40,5 @@ datFileName = testFileRoot + '.csv'
 
 d = getData.DataReader(datFileName)
 data = d.read()
-print('Testing Model for', len(deps), 'Independencies')
-errors = 0
-for dep in deps:
-    node, isDep, x, y, zlist = dep
-    X = data[x]
-    Y = data[y]
-    #print('X = ', X)
-    #print('Y = ', Y)
-    if zlist:
-        Z = []
-        for z in zlist:
-            zdat = data[z]
-            Z.append(zdat)
-        fval = independence.test([X], [Y], Z)
-    else:
-        fval = independence.test([X], [Y])
-    if isDep and fval > .1:
-        print('*** Model Error(1): ', dep, fval)
-        errors += 1
-    elif not isDep and fval < .1:
-        print('*** Model Error(2): ', dep, fval)
-        errors += 1
-    print('.',)
-print('Model Testing Completed with', errors, 'errors.')
-
-
-#print('data = ', data)
+errors = g.TestModel(data)
+print('errors = ', errors)

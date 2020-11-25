@@ -33,7 +33,10 @@ class DataReader():
 				line = line[:-1]
 			tokens = line.split(',')
 			for i in range(len(self.vars)):
-				val = float(tokens[i])
+				try:
+					val = float(tokens[i])
+				except:
+					val = 0
 				self.varData[self.vars[i]].append(val)
 		self.sampleCount = len(self.varData[self.vars[0]])
 		np.random.shuffle(self.vars)
