@@ -6,16 +6,17 @@ import random
 
 # Tuning Parameters
 MIN_COEF = .1  # Minimum absolute value for coefficients
-COEF_SCALE = 20 # Scale of exponential distribution to be added to the MIN_COEF
+COEF_SCALE = 5 # Scale of exponential distribution to be added to the MIN_COEF
 MEAN_MEAN = 0.0  # Average value of generated noise means
 MEAN_SCALE = 30 # Gaussian Standard Deviation to be added to MEAN_MEAN to choose the Mean of the noise
 MIN_STD = .1 # Minimum Scale parameter to be applied when generating noise
-STD_SCALE = 20 # Scale of exponential distribution to be added to MIN_STD when chosing the scale of the noise.
-DISTRS = ['normal'] # Set of distributions to be chosen from for generating noise.  
+STD_SCALE = 5 # Scale of exponential distribution to be added to MIN_STD when chosing the scale of the noise.
+
+#DISTRS = ['normal'] # Set of distributions to be chosen from for generating noise.  
 						# Note distributions must support location and scale parameters, and must allow negative locations
 
 						
-#DISTRS = ['logistic', 'lognormal', 'laplace','gumbel']
+DISTRS = ['lognormal', 'laplace', 'logistic', 'gumbel']
 VALIDATION = None
 CURR_EQUATION = 0
 NOISE_COUNT = 0
@@ -23,98 +24,102 @@ NOISES = {}
 COEF_COUNT = 0
 COEFS = {}
 RAW_EQUATIONS = []
+MAX_DIFFICULTY = 0
 
 # Input file name should typically have a .py extension
 def run(semFileName, samples=1000, maxDifficulty=0, reset=False):
-	global VALIDATION, NOISES, NOISE_COUNT, COEFS, COEF_COUNT, CURR_EQUATION, RAW_EQUATIONS
-	global smallestStd, largestStd, smallestCoef, largestCoef
-	if not RAW_EQUATIONS:
-		# First time.  Treat as if reset is True
-		reset = True
-	f = open(semFileName, 'r')
-	contents = f.read()
-	exec(contents, globals())
-	# For out file, use the input file name with the .csv extension
-	tokens = semFileName.split('.')
-	outFileRoot = str.join('.',tokens[:-1])
-	outFileName = outFileRoot + '.csv'
-	RAW_EQUATIONS = varEquations # From tag in the SEM file 'varEquations', a list of equations
-	varNames = []
-	for rv in model:
-		observed = True
-		if len(rv) >= 2:
-			name, parents = rv[:2]
-		if len(rv) >= 3:
-			observed = rv[2]
-		if len(rv) >= 4:
-			datType = rv[3]
-		if observed:
-			varNames.append(name)
-	success = False
-	while not success:
-		outLines = []
-		cEquations = []
-		cVarNames = []
-		#print('reset = ', reset)
-		if reset:
-			NOISES = {}
-			COEFS = {}
-			smallestStd = 10**100
-			largestStd = 0
-			smallestCoef = 10**100
-			largestCoef = 0
-		for eq in varEquations:
-			cEquations.append(compile(eq,'err', 'single'))
-		for varName in varNames:
-			cVarNames.append(compile(varName, 'err', 'eval'))
+    global VALIDATION, NOISES, NOISE_COUNT, COEFS, COEF_COUNT, CURR_EQUATION, RAW_EQUATIONS
+    global smallestStd, largestStd, smallestCoef, largestCoef, MAX_DIFFICULTY
+    if not RAW_EQUATIONS:
+        # First time.  Treat as if reset is True
+        reset = True
+    f = open(semFileName, 'r')
+    contents = f.read()
+    exec(contents, globals())
+    # For out file, use the input file name with the .csv extension
+    if maxDifficulty:
+        MAX_DIFFICULTY = maxDifficulty
+    print('MAX_DIFFICULTY = ', MAX_DIFFICULTY)
+    tokens = semFileName.split('.')
+    outFileRoot = str.join('.',tokens[:-1])
+    outFileName = outFileRoot + '.csv'
+    RAW_EQUATIONS = varEquations # From tag in the SEM file 'varEquations', a list of equations
+    varNames = []
+    for rv in model:
+        observed = True
+        if len(rv) >= 2:
+            name, parents = rv[:2]
+        if len(rv) >= 3:
+            observed = rv[2]
+        if len(rv) >= 4:
+            datType = rv[3]
+        if observed:
+            varNames.append(name)
+    success = False
+    while not success:
+        outLines = []
+        cEquations = []
+        cVarNames = []
+        #print('reset = ', reset)
+        if reset:
+            NOISES = {}
+            COEFS = {}
+            smallestStd = 10**100
+            largestStd = 0
+            smallestCoef = 10**100
+            largestCoef = 0
+        for eq in varEquations:
+            cEquations.append(compile(eq,'err', 'single'))
+        for varName in varNames:
+            cVarNames.append(compile(varName, 'err', 'eval'))
 
-		outLine = str.join(',', varNames) + '\n'
-		outLines.append(outLine)
+        outLine = str.join(',', varNames) + '\n'
+        outLines.append(outLine)
 
 
-		for sample in range(samples):
-			outTokens = []
-			NOISE_COUNT = 0
-			COEF_COUNT = 0
-			for i in range(len(cEquations)):
-				CURR_EQUATION = i
-				varEquation = cEquations[i]
-				try:
-					exec(varEquation)
-				except:
-					print('*** Invalid Equation = ', RAW_EQUATIONS[i])
-					print(getSEM())
-			for i in range(len(cVarNames)):
-				outTokens.append(str(eval(cVarNames[i])))
-				#print (varNames[i], '=', eval(cVarNames[i]))
-			endline = '\n'	
-			if sample == samples-1:
-				endline = ''
-			outLine = str.join(',', outTokens) + endline
-			outLines.append(outLine)
-		f = open(outFileName, 'w')
-		f.writelines(outLines)
-		f.close()
-		success = True
-		# if maxDifficulty == 0 or not reset:
-		# 	success = True 
-		# else:
-		# 	difficulty = determineDifficulty(outFileRoot,samples)
-		# 	if difficulty <= maxDifficulty:
-		# 		if difficulty <= maxDifficulty / 2.0:
-		# 			#print('Failed: difficulty = ', difficulty, ', maxDiff = ', maxDifficulty)
-		# 			increaseRange()
-		# 			reset = True
-		# 			success = False
-		# 		else:
-		# 			#print('Success: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
-		# 			success = True
-		# 	else:
-		# 		#print('Failed: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
-		# 		decreaseRange()
-		# 		reset = True
-		# 		success = False
-	return outFileName
+        for sample in range(samples):
+            outTokens = []
+            NOISE_COUNT = 0
+            COEF_COUNT = 0
+            for i in range(len(cEquations)):
+                CURR_EQUATION = i
+                varEquation = cEquations[i]
+                try:
+                    exec(varEquation)
+                except:
+                    print('*** Invalid Equation = ', RAW_EQUATIONS[i])
+                    print(getSEM())
+            for i in range(len(cVarNames)):
+                outTokens.append(str(eval(cVarNames[i])))
+                #print (varNames[i], '=', eval(cVarNames[i]))
+            endline = '\n'	
+            if sample == samples-1:
+                endline = ''
+            outLine = str.join(',', outTokens) + endline
+            outLines.append(outLine)
+        f = open(outFileName, 'w')
+        f.writelines(outLines)
+        f.close()
+        success = True
+        # if maxDifficulty == 0 or not reset:
+        # 	success = True 
+        # else:
+        # 	difficulty = determineDifficulty(outFileRoot,samples)
+        # 	if difficulty <= maxDifficulty:
+        # 		if difficulty <= maxDifficulty / 2.0:
+        # 			#print('Failed: difficulty = ', difficulty, ', maxDiff = ', maxDifficulty)
+        # 			increaseRange()
+        # 			reset = True
+        # 			success = False
+        # 		else:
+        # 			#print('Success: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
+        # 			success = True
+        # 	else:
+        # 		#print('Failed: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
+        # 		decreaseRange()
+        # 		reset = True
+        # 		success = False
+    return outFileName
 
 def determineDifficulty(fileName, samples):
 	import analyzeSEM
@@ -167,7 +172,7 @@ def getSEM():
 	outStr = str.join('\n', outEquations)
 	return outStr
 	
-DISTRS = ['logistic']
+#DISTRS = ['logistic']
 #DISTRS = ['logistic', 'lognormal', 'laplace','gumbel']
 
 def noise():
@@ -180,7 +185,7 @@ def noise():
 		std = chooseStd()
 		currNoise = distType + '(' + str(mean) + ',' + str(std) + ')'
 		NOISES[NOISE_COUNT] = currNoise
-		#print('noise[', NOISE_COUNT, '] = ', currNoise)
+		print('noise[', NOISE_COUNT, '] = ', currNoise)
 	NOISE_COUNT += 1
 	return eval(currNoise)
 
@@ -211,7 +216,7 @@ def coef():
 		coef *= sign
 		coef = round(coef, 3)
 		COEFS[COEF_COUNT] = coef
-		#print('coef[', COEF_COUNT, '] = ', coef)
+		print('coef[', COEF_COUNT, '] = ', coef)
 	COEF_COUNT += 1
 	return coef
 

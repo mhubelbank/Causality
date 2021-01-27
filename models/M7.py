@@ -1,7 +1,4 @@
 # ----------------------------------------------------------------------------
-# SEM Definitions
-#
-# ----------------------------------------------------------------------------
 # Model Definition
 # ----------------------------------------------------------------------------
 
@@ -18,7 +15,7 @@ testDescript = 'Reference Model M7'
 # - isObserved (Optional, default True)
 # - Data Type (Optional, default 'Numeric')  
 model = [   ('B', []),
-            ('F', [], False),
+            ('F', [], True),
             ('G', []),
 			('A' , ['B', 'F']),
 			('C', ['B', 'D']),
@@ -27,12 +24,13 @@ model = [   ('B', []),
 		]
 
 varEquations = [
-			    'B = math.sin((t % 365) / 365 * 6.28) * 50 + 40 + normal(0, 5)',
-                'F = normal(10, 7)',
+			    #'B = math.sin((t % 365) / 365 * 6.28) * 50 + 40 + normal(0, 5)',
+                'B = exponential() * 50',
+                'F = normal(5, 2)',
                 'G = logistic(55, 10)',
-			    'A = .5 * B + .3 * F + normal(0,5)',
-                'D = .25 * A + .35 * G + normal(0,5)',
+			    'A = .5 * B + .3 * F + exponential()',
+                'D = .25 * A + .35 * G + logistic(0,5)',
  			    'C = .25 * B + .2 * D + normal(0, 5)',
-                'E = .5 * C + normal(0,3)',
+                'E = .5 * C + logistic(0,3)',
                 't = t + 1'
 		        ]

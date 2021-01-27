@@ -32,7 +32,11 @@ class cGraph:
                 self.edgeDict[d].append(edge)
             else:
                 self.edgeDict[d] = [edge]
-        
+    
+    def isExogenous(self, varName):
+        rv = self.rvDict[varName]
+        return not rv.parentNames
+
     def printGraph(self):
         print('Nodes:', self.g.nodes())
         print('Edges:', self.g.edges())
@@ -138,20 +142,35 @@ class cGraph:
     # a list of data values for that variable's series.
     # The lengths of all variable's lists should match.
     # That is, the number of samples for each variable must
-    # be the same. 
-    # Returns [(errType, x, y, z, isDep, errStr)]
-    # Where errType = 1 (Expected ndependence not observed) or 
+    # be the same.
+    #
+    # Returns (confidence, numTotalTests, [numTestsPerType], [numErrsPerType], [errorDetails])
+    # Where:
+    #   - confidence is an estimate of the likelihood that the data generating process defined
+    #       by the model produced the data being tested.  Ranges from 0.0 to 1.0.
+    #   - numTotalTests is the number of independencies and dependencies implied by the model.
+    #   - numTestsPerType is a list, for each error type, 0 - nTypes, of the number of tests that
+    #       test for the given error type.
+    #   - numErrsPerType is a list, for each error type, of the number of failed tests.
+    #   - errorDetails is a list of failed tests, each with the following format:
+    #       [(errType, x, y, z, isDep, errStr)]
+    #       Where:
+    #           errType = 0 (Exogenous variables not independent) or;
+    #                    1 (Expected independence not observed) or; 
     #                   2 (Expected dependence not observed)
-    #       x, y, z are each a list of variable names that
+    #           x, y, z are each a list of variable names that
     #               comprise the statement x _||_ y | z.
     #               That is x is independent of y given z.
-    #       isDep True if a dependence is expected.  False for 
+    #           isDep True if a dependence is expected.  False for 
     #               independence
-    #       pval -- The p-val returned from the independence test
-    #       errStr A human readable error string describing the error
+    #           pval -- The p-val returned from the independence test
+    #           errStr A human readable error string describing the error
     #
     def TestModel(self, data, order=3):
+        numTestTypes = 3
         errors = []
+        numTestsPerType = [0] * numTestTypes
+        numErrsPerType = [0] * numTestTypes
         deps = self.computeDependencies(order)
         if VERBOSE:
             print('Testing Model for', len(deps), 'Independencies')
@@ -162,6 +181,8 @@ class cGraph:
             #print('X = ', X)
             #print('Y = ', Y)
             Z = []
+            if zlist is None:
+                zlist = []
             if zlist:
                 for z in zlist:
                     zdat = data[z]
@@ -169,23 +190,44 @@ class cGraph:
                 pval = independence.test([X], [Y], Z)
             else:
                 pval = independence.test([X], [Y])
-            errType = 0
-            if isDep and pval > .1:
-                errStr = 'Warning (Type 2) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
+            errStr = None
+            testType = -1
+            if not Z and self.isExogenous(x) and self.isExogenous(y):
+                testType = 0
+            elif not isDep:
+                testType = 1
+            else:
+                testType = 2
+            numTestsPerType[testType] += 1
+            if testType == 0 and pval < .1:
+                errStr = 'Error (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+            elif testType == 2 and pval > .1:
+                errStr = 'Warning (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
                 errType = 2
-            elif not isDep and pval < .1:
-                errStr = 'Error (Type 1) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+            elif testType == 1 and pval < .1:
+                errStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
                 errType = 1
-            if errType:
+            if errStr:
                 if VERBOSE:
                     print('***', errStr)
-                errors.append((errType, [x], [y], list(zlist), isDep, pval, errStr))
+                errors.append((testType, [x], [y], list(zlist), isDep, pval, errStr))
+                numErrsPerType[testType] += 1
             elif VERBOSE:
                 print('.',)
+        confidence = 1.0
+        failurePenaltyPerType = [1, 1, 1]
+        errorRatios = [0.0] * numTestTypes
+        for i in range(numTestTypes):
+            nTests = numTestsPerType[i]
+            nErrs = numErrsPerType[i]
+            if nTests > 0:
+                ratio = nErrs / nTests
+                errorRatios[i] = ratio
+                confidence -= ratio * failurePenaltyPerType[i] / numTestTypes
+        confidence = max([confidence, 0.0])
+        numTotalTests = len(deps)
         if VERBOSE:
-            print('Model Testing Completed with', len(errors), 'error(s).')
-        return errors
-        
-
+            print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
+        return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors)
 
     

@@ -40,5 +40,7 @@ datFileName = testFileRoot + '.csv'
 
 d = getData.DataReader(datFileName)
 data = d.read()
-errors = g.TestModel(data)
-print('errors = ', errors)
+results = g.TestModel(data)
+conf = results[0]
+print('\nConfidence = ', round(conf * 100, 1), '%, testPerType = ', results[2], ', errsPerType = ', results[3])
+#print('TestResults = ', results)
