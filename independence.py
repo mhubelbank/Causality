@@ -39,9 +39,10 @@ def testSDCIT(X, Y, Z=[]):
     Za = np.array(Z).transpose()
     Kx, Ky, Kz = rbf_kernel_median(Xa, Ya, Za)
     test_stat, p_value = SDCIT(Kx, Ky, Kz)
-    print('p = ', p_value)
+    #print('p = ', p_value)
     return p_value
 
 def test(X, Y, Z=[]):
     p_val = testFCIT(X, Y, Z)
+    #p_val = testSDCIT(X, Y, Z)
     return p_val

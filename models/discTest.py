@@ -6,7 +6,7 @@
 t = 0
 
 # Describe the test
-testDescript = 'Reference Model M0-- Simple V'
+testDescript = 'Test with discrete values for stats testing'
 
 # Define the causal model.
 # Each random variable has the following fields:
@@ -20,9 +20,9 @@ model =    [('A', []),
 			]
 
 varEquations = [
-			    'A = exponential() * 10',
-			    'C = normal(0,20)',
-			    'B = A + C + logistic(0, 10)',
+			    'A = 1 if uniform(0,1) > .5 else 0',
+			    'C = 1 if uniform(0,1) > .75 else 0',
+			    'B = A + C',
 		        ]
 
 

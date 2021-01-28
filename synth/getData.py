@@ -1,11 +1,9 @@
-inputFileName = '..\data\synthData4.csv'
-#inputFileName = '..\data\experiment1.csv'
 import numpy as np
 import random
 
 
 class DataReader():
-	def __init__(self, input = inputFileName, limit=0):
+	def __init__(self, input, limit=0):
 		if limit == 0:
 			self.limit = 100000000
 		else:
