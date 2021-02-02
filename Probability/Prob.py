@@ -263,18 +263,18 @@ class Sample:
                     conditionalizeOn.append(given)
                 filtSpecs = self.jointCondSpecs(conditionalizeOn)
                 for f in filtSpecs:
-                    value = f[0]
-                    given = conditionalizeOn[0]
-                    probGV = self.prob(given, value) # P(Z=z)
-                    if probGV == 0:
+                    value = f[0][1]
+                    given = f[0][0]
+                    probZ = self.jointProb(f) # P(Z=z)
+                    if probZ == 0:
                          # Zero probability -- don't bother accumulating
                         continue
-                    # probTGV is P(filteredY | Z=z) e.g., P(Y | X=1, Z=z)
-                    probTGV = filtSample.distr(rvName, (given, value))
-                    if not probTGV:
+                    # probTGZ is P(filteredY | Z=z) e.g., P(Y | X=1, Z=z)
+                    probTGZ = filtSample.distr(rvName, f)
+                    if not probTGZ:
                         # Zero probability.  No need to accumulate
                         continue
-                    probs = probTGV.ToHistogram() * probGV # Creates an array of probabilities
+                    probs = probTGZ.ToHistogram() * probZ # Creates an array of probabilities
                     if accum is None:
                         accum = probs
                     else:
@@ -313,6 +313,7 @@ class Sample:
     def jointCondSpecs(self, rvList):
         condSpecList = []
         jointVals = self.jointValues(rvList)
+        #print('jointVals  =', jointVals)
         for item in jointVals:
             condSpecs = []
             for i in range(len(rvList)):
@@ -323,6 +324,23 @@ class Sample:
             condSpecList.append(condSpecs)
         return condSpecList
 
+    def jointProb(self, varSpecs):
+        """ Return the joint probability given a set of variables and their
+            values.  varSpecs is of the form (varName, varVal).  We want
+            to find the probability of all of the named variables having
+            the designated value, which is the product of all the individual
+            probabilities.
+        """
+        accum = []
+        for varSpec in varSpecs:
+            rvName, val  = varSpec
+            prob = self.prob(rvName, val)
+            accum.append(prob)
+        # Return the product of the accumulated probabilities
+        allProbs = np.array(accum)
+        jointProb = float(np.prod(allProbs))
+        #print('jointProb: varSpecs = ', varSpecs, ', prob = ', jointProb)
+        return jointProb
 
     def pdfToProbArray(self, pdf):
         vals = []
