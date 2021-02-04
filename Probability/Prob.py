@@ -3,6 +3,8 @@ import numpy as np
 import math
 from Probability.pdf import PDF
 
+VERBOSE = False
+
 class Sample:
     def __init__(self, ds, density = 1.0, discSpecs = None):
         """ Create a probability sample object.  Sample provides a mechanism for analyzing
@@ -40,24 +42,27 @@ class Sample:
         if discSpecs:
             self.discSpecs = self.fixupDiscSpecs(discSpecs)
             #print('self.aData = ', self.aData)
-            self.discretized = self.aData
+            self.discretized = self.discretize()
         else:
             self.discSpecs = self.calcDiscSpecs()
             self.discretized = self.discretize()
 
     def getAgg(self, ds):
         fieldList = list(ds.keys())
-
-        #print('shape = ', aData.shape)
-        mins = self.aData.min(1)
-        maxs = self.aData.max(1)
-        means = self.aData.mean(1)
-        #print('means = ', means)
-        stds = self.aData.std(1)
+        #print('shape = ', self.aData.shape)
+        numObs = self.aData.shape[1]  # Number of observations
+        if numObs > 0:
+            mins = self.aData.min(1)
+            maxs = self.aData.max(1)
+            means = self.aData.mean(1)
+            stds = self.aData.std(1)
         outDict = {}
         for i in range(self.aData.shape[0]):
             fieldName = fieldList[i]
-            aggs = (mins[i], maxs[i], means[i], stds[i])
+            if numObs:
+                aggs = (mins[i], maxs[i], means[i], stds[i])
+            else:
+                aggs = (0,0,0,0)
             outDict[fieldName] = aggs
         return outDict
 
@@ -116,8 +121,6 @@ class Sample:
             fieldName = self.fieldList[f]
             #print('discretized = ', discretized.shape, discretized)
             fieldVals = list(discretized[f, :])
-            if len(fieldVals) == 0:
-                return None
             data[fieldName] = fieldVals
         return data
 
@@ -142,7 +145,6 @@ class Sample:
         return range(bucketCount)
 
     def filter(self, filtSpecs):
-        #print('self.discretized = ', self.discretized)
         filtSpecs2 = []
         # Transform filtSpecs from (fieldName, value) to (fieldIndex, discretizedValue)
         for filt in filtSpecs:
@@ -152,7 +154,6 @@ class Sample:
             edges = list(dSpec[3])
             dValue = np.digitize(value, edges[:-1]) - 1
             filtSpecs2.append((indx, dValue))
-            #print('dValue = ', dValue)
         remRecs = []
         for i in range(self.N):
             include = True
@@ -163,8 +164,8 @@ class Sample:
                     break
             if not include:
                 remRecs.append(i)
+
         filtered = np.delete(self.aData, remRecs, 1)
-        #print('filtered = ', filtered.shape,  filtered)
         # Now convert to orginal format, with only ecords that passed filter
         orgFilt = self.toOriginalForm(filtered)
         return orgFilt
@@ -210,19 +211,29 @@ class Sample:
             - distr('Y', [('X1', 1), ('X2', 0)]) - The probability of Y given X1 = 1, and X2 = 0
             - distr('Y', [('X', 1), 'Z']) -- The probability of Y given X = 1, conditionalized on Z
         """
+        if VERBOSE:
+            print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
         isDiscrete = self.isDiscrete(rvName)
+        indx = self.fieldIndex[rvName]
+        dSpec = self.discSpecs[indx]
+        bins = dSpec[0]
+
         if givenSpecs is None:
             # Marginal (unconditional) Probability
-            indx = self.fieldIndex[rvName]
-            dSpec = self.discSpecs[indx]
+            bins = dSpec[0]
             hist = list(dSpec[4])
+            if not hist:
+                hist = [0] * bins
             edges = list(dSpec[3])
             minV = dSpec[1]
             maxV = dSpec[2]
             outHist = []
             for i in range(len(hist)):
                 val = hist[i]
-                outHist.append(val / self.N)
+                if self.N > 0:
+                    outHist.append(val / self.N)
+                else:
+                    outHist.append(0)
             pdfSpec = []
             for i in range(len(outHist)):
                 start = edges[i]
@@ -246,9 +257,6 @@ class Sample:
                     # Its a variable to conditionalize on.
                     condSpecs.append(givenSpec[0])
             newData = self.filter(filtSpecs)
-            if not newData:
-                # No data left after filtering.  Return a null distribution
-                return None
             # Create a new probability object based on the filtered data
             filtSample = Sample(newData, density = self.density, discSpecs = self.discSpecs)
             if len(condSpecs) == 0:
@@ -257,28 +265,29 @@ class Sample:
             else:
                 # Conditionalize on all indicated variables. I.e.,
                 # SUM(P(filteredY | Z=z) * P(Z=z)) for all z in Z.
-                accum = None
+                accum = np.zeros((bins,))
                 conditionalizeOn = []
                 for given in condSpecs:
                     conditionalizeOn.append(given)
                 filtSpecs = self.jointCondSpecs(conditionalizeOn)
+                #print('filtSpecs = ', filtSpecs)
+                countRatio = float(self.N) / filtSample.N 
+                #print('countRatio = ', countRatio)
                 for f in filtSpecs:
-                    value = f[0][1]
-                    given = f[0][0]
                     probZ = self.jointProb(f) # P(Z=z)
                     if probZ == 0:
                          # Zero probability -- don't bother accumulating
                         continue
-                    # probTGZ is P(filteredY | Z=z) e.g., P(Y | X=1, Z=z)
-                    probTGZ = filtSample.distr(rvName, f)
-                    if not probTGZ:
+                    # probYgZ is P(filteredY | Z=z) e.g., P(Y | X=1, Z=z)
+                    probYgZ = filtSample.distr(rvName, f)
+                    if not probYgZ:
                         # Zero probability.  No need to accumulate
                         continue
-                    probs = probTGZ.ToHistogram() * probZ # Creates an array of probabilities
-                    if accum is None:
-                        accum = probs
-                    else:
-                        accum += probs
+                    probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
+                    #print('f = ', f, 'probs = ', probs)
+                    accum += probs
+                #accum = accum * (1/sum(accum))
+                #print('accum = ', accum, sum(accum))
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
                 # original bin structure. 
@@ -301,6 +310,7 @@ class Sample:
         nVars = len(rvList)
         rvName = rvList[0]
         vals = self.getMidpoints(rvName)
+        #print('jointVals: vals = ', vals)
         if nVars == 1:
             return ([(val,) for val in vals])
         else:
@@ -328,15 +338,19 @@ class Sample:
         """ Return the joint probability given a set of variables and their
             values.  varSpecs is of the form (varName, varVal).  We want
             to find the probability of all of the named variables having
-            the designated value, which is the product of all the individual
-            probabilities.
+            the designated value.
         """
         accum = []
-        for varSpec in varSpecs:
-            rvName, val  = varSpec
-            prob = self.prob(rvName, val)
-            accum.append(prob)
-        # Return the product of the accumulated probabilities
+        nSpecs = len(varSpecs)
+        for i in range(nSpecs):
+            rv, val = varSpecs[i]
+            if i == nSpecs - 1:
+                accum.append(self.prob(rv, val))
+            else:
+                nextSpecs = varSpecs[i+1:]
+                accum.append(self.prob(rv, val, nextSpecs))
+
+       # Return the product of the accumulated probabilities
         allProbs = np.array(accum)
         jointProb = float(np.prod(allProbs))
         #print('jointProb: varSpecs = ', varSpecs, ', prob = ', jointProb)

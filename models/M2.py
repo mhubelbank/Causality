@@ -4,6 +4,8 @@
 
 # Initialize any variables here
 t = 0
+from random import *
+bRange = 2
 
 # Describe the test
 testDescript = 'Reference Model M2'
@@ -21,8 +23,11 @@ model =    [('B', []),
 
 # Structural Equation Model for data generation
 varEquations = [
-			    'B = noise()',
-			    'A = coef() * B + noise()',
-			    'C = coef() * A + coef() * B + noise()',
+			    #'B = logistic(1, 1)',
+			    #'A = .8 * B + normal(0, .5)',
+			    #'C = 1.5 * A + 2 * B + normal(0, .2)',
+                'B = choice(range(-bRange, bRange+1))',
+			    'A = 1 * B  + normal(0,3)',
+			    'C = 1.5 * A + 2 * B + normal(0,3)',
                 't = t + 1'
 		        ]
