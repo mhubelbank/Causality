@@ -79,11 +79,13 @@ class Sample:
                 nBins = maxV - minV + 1
                 binStarts = [v for v in range(minV, maxV + 1)]
                 vals, counts = np.unique(self.aData[i], return_counts = True)
+                #print('vals, counts = ', vals, counts)
                 hist = np.zeros((len(binStarts),))
                 for j in range(len(vals)):
                     val = int(vals[j])
                     count = counts[j]
-                    hist[val] = count
+                    #print('va, count, hist = ', val, count, hist)
+                    hist[j] = count
                 edges = [v for v in range(minV, maxV + 2)]
             else:
                 if self.N < 100:
@@ -229,9 +231,9 @@ class Sample:
             maxV = dSpec[2]
             outHist = []
             for i in range(len(hist)):
-                val = hist[i]
+                cnt = hist[i]
                 if self.N > 0:
-                    outHist.append(val / self.N)
+                    outHist.append(cnt / self.N)
                 else:
                     outHist.append(0)
             pdfSpec = []
@@ -256,11 +258,13 @@ class Sample:
                 else:
                     # Its a variable to conditionalize on.
                     condSpecs.append(givenSpec[0])
-            newData = self.filter(filtSpecs)
-            # Create a new probability object based on the filtered data
-            filtSample = Sample(newData, density = self.density, discSpecs = self.discSpecs)
-            if len(condSpecs) == 0:
-                # No conditionalizing needed.  Return the pdf of the filtered data.
+            if not condSpecs:
+                # Nothing to conditionalize on.  We can just filter the distribution
+                # and return the filtered dist
+                newData = self.filter(filtSpecs)
+                # Create a new probability object based on the filtered data
+                filtSample = Sample(newData, density = self.density, discSpecs = self.discSpecs)
+                #filtSample = Sample(newData, density = self.density)
                 outPDF = filtSample.distr(rvName)
             else:
                 # Conditionalize on all indicated variables. I.e.,
@@ -269,29 +273,30 @@ class Sample:
                 conditionalizeOn = []
                 for given in condSpecs:
                     conditionalizeOn.append(given)
-                filtSpecs = self.jointCondSpecs(conditionalizeOn)
+                condfiltSpecs = self.jointCondSpecs(conditionalizeOn)
                 #print('filtSpecs = ', filtSpecs)
-                countRatio = float(self.N) / filtSample.N 
+                #countRatio = float(self.N) / filtSample.N
                 #print('countRatio = ', countRatio)
-                for f in filtSpecs:
-                    probZ = self.jointProb(f) # P(Z=z)
+                for cf in condfiltSpecs:
+                    totalF = filtSpecs + cf
+                    #print('totalF = ', totalF)
+                    probZ = self.jointProb(cf) # P(Z=z)
                     if probZ == 0:
                          # Zero probability -- don't bother accumulating
                         continue
-                    # probYgZ is P(filteredY | Z=z) e.g., P(Y | X=1, Z=z)
-                    probYgZ = filtSample.distr(rvName, f)
+                    # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
+                    probYgZ = self.distr(rvName, totalF)
                     if not probYgZ:
                         # Zero probability.  No need to accumulate
                         continue
                     probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
-                    #print('f = ', f, 'probs = ', probs)
+                    #print('f = ', totalF, 'probs = ', probs)
                     accum += probs
-                #accum = accum * (1/sum(accum))
                 #print('accum = ', accum, sum(accum))
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
                 # original bin structure. 
-                template = filtSample.distr(rvName)
+                template = self.distr(rvName)
                 outSpecs = []
                 for i in range(len(accum)):
                     pdfBin = template.getBin(i)

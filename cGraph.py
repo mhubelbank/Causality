@@ -63,6 +63,11 @@ class cGraph:
                 parents.append(a[0])
         return parents
 
+    def isChild(self, parentNode, childNode):
+        if parentNode in self.getParents(childNode):
+            return True
+        return False
+
     def combinations(self, inSet):
         c = []
         
@@ -93,11 +98,12 @@ class cGraph:
             nCDeps += nDeps * combinations(n-2, r)
         return (nDeps, nCDeps, nDeps + nCDeps)
 
-    def getCombinations(self, nodes, order):
+    def getCombinations(self, nodes=None, order=3, minOrder = 1):
         from itertools import combinations
-        nodes = self.g.nodes()
+        if nodes is None:
+            nodes = self.g.nodes()
         allCombos = []
-        for o in range(1, order):
+        for o in range(minOrder, order+1):
             combos = combinations(nodes, o)
             allCombos += combos
         return allCombos
@@ -250,7 +256,7 @@ class cGraph:
             print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
         return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors)
 
-    def intervene(self, targetRV, doList):
+    def intervene(self, targetRV, doList, controlFor = []):
         """ Implements Intverventions (Level2 of Ladder of Causality)
             of the form P(Y | do(X1=x1)).  That is, the Probability
             of Y given that we set X1 to x1.  This is generalized
@@ -274,18 +280,68 @@ class cGraph:
 
         # Find all the backdoor paths and identify the minimum set of variables (Z) that
         # block all such paths without opening any new paths.
-        blockingSet = self.findBlockingSet(doListF[0][0], targetRV)
+        blockingSet = self.findBackdoorBlockingSet(doListF[0][0], targetRV)
         # Now we compute the probability distribution of Y conditionalized on all of the blocking
         # variables.
-        given = doList + blockingSet
+        given = doList + blockingSet + controlFor
         distr = self.prob.distr(targetRV, given)
         # We return the probability distribution
         return distr
 
-    def findBlockingSet(self, source, target):
+    def ACE(self, cause, effect):
+        """ Average Causal Effect of cause on effect.
+        """
+        causeDistr = self.prob.distr(cause)
+        causeMean = causeDistr.E()
+        causeStd = causeDistr.stDev()
+        effectAtMean = self.intervene(effect, [(cause, causeMean)]).E()
+        tests = [-1, -.5, -.2, .2, .5, 1 ]
+        testResults = []
+        for test in tests:
+            testBound = causeMean + (causeStd * test)
+            diff = testBound - causeMean
+            effectAtBound = self.intervene(effect, [(cause, testBound)]).E()
+            ace = (effectAtBound - effectAtMean) / diff
+            testResults.append(ace)
+        #print('testResults = ', testResults)
+        tr = np.array(testResults)
+        final = float(np.mean(tr))
+        #print('tr = ', list(tr))
+        #print('ACE = ', effectAtMean, effectAtUpper, ace)
+        return final
+
+
+    def CDE(self, cause, effect):
+        """ Controlled Direct Effect of cause on effect
+        """
+        causeDistr = self.prob.distr(cause)
+        causeMean = causeDistr.E()
+        causeStd = causeDistr.stDev()
+        if not self.isChild(cause, effect):
+            # Can't have a direct effect if cause is not a parent of effect
+            return 0.0
+        bdBlocking = self.findBackdoorBlockingSet(cause, effect)
+        fdBlocking = self.findFrontdoorBlockingSet(cause, effect)
+        given = bdBlocking + fdBlocking
+        effectAtMean = distr = self.prob.distr(effect, [(cause, causeMean)] + given).E()
+        tests = [-1, -.5, -.2, .2, .5, 1 ]
+        testResults = []
+        for test in tests:
+            testBound = causeMean + (causeStd * test)
+            diff = testBound - causeMean
+            effectAtBound = distr = self.prob.distr(effect, [(cause, testBound)] + given).E()
+            cde = (effectAtBound - effectAtMean) / diff
+            testResults.append(cde)
+        #print('testResults = ', testResults)
+        tr = np.array(testResults)
+        final = float(np.mean(tr))
+        return final
+
+    def findBackdoorBlockingSet(self, source, target):
         """ Find the minimal set of nodes that block all backdoor paths from source
             to target.
         """
+        maxBlocking = 3
         bSet = []
         # find all paths from parents of source to target.
         parents = self.getParents(source)            
@@ -313,38 +369,84 @@ class cGraph:
                     else:
                         pathNodes[i] += 1
         pathTups = []
+        # First look for single node solutions
         for node in pathNodes.keys():
             cnt = pathNodes[node]
             outTup = (cnt, node)
             pathTups.append(outTup)
-
-       
+               
         # Sort the nodes in descending order of the number of paths containing it
         pathTups.sort()
         pathTups.reverse()
-        for pathTup in pathTups:
-            node = pathTup[1]
-            bSet.append(node)
-            break
+        combos = [(tup[1],) for tup in pathTups]
+        #print('pathNodes = ', pathNodes.keys())
+        # Now add any multiple field combinations.  Order is not significant here.
+        multiCombos = self.getCombinations(pathNodes.keys(), maxBlocking, minOrder=2)
+        combos += multiCombos
+        #print('combos = ', combos)
+        for nodeSet in combos:
+            testSet = set(nodeSet)
+            #print('testSet = ', list(testSet))
+            if networkx.d_separated(self.g, set(parents), {target}, testSet):
+                bSet = list(testSet)
+                break
 
-        print('blocking = ', bSet)
+        print('BDblocking = ', bSet)
         return bSet
 
-    def ACE(self, cause, effect):
-        """ Average Causal Effect of cause on effect.
-        """
-        causeMean = self.prob.distr(cause).E()
-        effectAtMean = self.intervene(effect, [(cause, causeMean)]).E()
-        tests = [1.2, 1.5, 2.0, 1/1.2, 1/1.5, 1/2.0]
-        testResults = []
-        for test in tests:
-            testBound = causeMean * test
-            diff = testBound - causeMean
-            effectAtBound = self.intervene(effect, [(cause, testBound)]).E()
-            ace = (effectAtBound - effectAtMean) / diff
-            testResults.append(ace)
-        tr = np.array(testResults)
-        final = float(np.mean(tr))
-        #print('tr = ', list(tr))
-        #print('ACE = ', effectAtMean, effectAtUpper, ace)
-        return final
+    def findFrontdoorBlockingSet(self, source, target):
+        backdoorSet = self.findBackdoorBlockingSet(source, target)
+        maxBlocking = 3
+        bSet = []
+        # Create a graph view that removes the direct link from the source to the destination
+        def includeEdge(s, d):
+            #print('source, dest = ', s, d)
+            if s == source and d == target:
+                return False
+            return True
+
+        pathNodes = {}
+        vg = networkx.subgraph_view(self.g, filter_edge=includeEdge)
+        # Use that view to find all indirect paths from source to dest
+        paths0 = networkx.all_simple_paths(vg, source, target)
+        paths = [path for path in paths0]
+        print('paths = ', paths)
+        if len(paths) == 0:
+            # No indirect paths
+            return []
+        for path in paths:
+            #print('path = ', path)
+            # Remove the first and last node of the path -- always the source and target
+            intermediates = path[1:-1]
+            #print('int = ', intermediates)
+            for i in intermediates:
+                if i not in pathNodes:
+                    pathNodes[i] = 1
+                else:
+                    pathNodes[i] += 1
+        pathTups = []
+        # First look for single node solutions
+        for node in pathNodes.keys():
+            cnt = pathNodes[node]
+            outTup = (cnt, node)
+            pathTups.append(outTup)
+               
+        # Sort the nodes in descending order of the number of paths containing it
+        pathTups.sort()
+        pathTups.reverse()
+        combos = [(tup[1],) for tup in pathTups]
+        #print('pathNodes = ', pathNodes.keys())
+        # Now add any multiple field combinations.  Order is not significant here.
+        multiCombos = self.getCombinations(pathNodes.keys(), maxBlocking, minOrder=2)
+        combos += multiCombos
+        print('combos = ', combos)
+        for nodeSet in combos:
+            testSet = set(list(nodeSet) + list(backdoorSet))
+            #print('testSet = ', list(testSet))
+            if networkx.d_separated(vg, {source}, {target}, testSet):
+                bSet = list(testSet)
+                break
+
+        print('FDblocking = ', bSet)
+        return bSet
+

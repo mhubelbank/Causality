@@ -4,7 +4,7 @@
 
 # Initialize any variables here
 t = 0
-
+bRange = 2
 # Describe the test
 testDescript = 'Reference Model M3'
 
@@ -22,9 +22,9 @@ model =    [('B', []),
 
 # Structural Equation Model for data generation
 varEquations = [
-			    'B = noise()',
-			    'A = coef() * B + noise()',
-                'D = coef() * A*A + noise()',
-			    'C = coef() * B + coef() * D + noise()',
+                'B = choice(range(-bRange, bRange+1))',
+			    'A = 1 * B + normal(0,1)',
+                'D = .5 * A + normal(0,1)',
+			    'C = .5 * B + 1 * D + normal(0,1)',
                 't = t + 1'
 		        ]

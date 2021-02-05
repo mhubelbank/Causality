@@ -37,18 +37,42 @@ g = cGraph.cGraph(gnodes, data)
 
 g.printGraph()
 
-deps = g.computeDependencies(3)
+#deps = g.computeDependencies(3)
 
 #print('deps = ', deps)
-g.printDependencies(deps)
-print('P(C)')
-print('E(C | do(A=1)) = ', g.intervene('C', [('A', 1)]).E())
-print('E(C | do(A=2)) = ', g.intervene('C', [('A', 2)]).E())
-print('E(C | A=1, B) = ', g.prob.distr('C', [('A', 1), 'B']).E())
-print('E(C | A=2, B) = ', g.prob.distr('C', [('A', 2), 'B']).E())
-print('ACE(A, C) = ', g.ACE('A', 'C'))
+#g.printDependencies(deps)
+aBar = g.prob.distr('A').E()
+print('E(A) ', aBar)
+aStd = g.prob.distr('A').stDev()
+print('std(A) = ', aStd)
+aHigh = aBar + .5 * aStd
+aLow = aBar - .5 * aStd
+print('Test Bounds = [', aLow, ',', aHigh, ']')
+h1 = g.prob.distr('C', [('A', aHigh)]).E()
+l1 = g.prob.distr('C', [('A', aLow)]).E()
+print('E(C | A = aHigh)', h1)
+print('E(C | A = aLow) = ', l1)
+print('diff = ', h1 - l1)
+
+h2 = g.prob.distr('C', [('A', aHigh), 'B']).E()
+l2 = g.prob.distr('C', [('A', aLow), 'B']).E()
+print('E(C | A = aHigh,B)', h2)
+print('E(C | A = aLow, B) = ', l2)
+print('diff = ', h2 - l2)
+
+h3 = g.intervene('C', [('A', aHigh)]).E()
+l3 = g.intervene('C', [('A', aLow)]).E()
+print('E(C | do(A=aHigh)) = ', h3)
+print('E(C | do(A=aLow)) = ', l3)
+print('diff = ', h3 - l3)
+
+ace = g.ACE('A', 'C')
+print('ACE(A, C) = ', ace)
 print('ACE(C, A) = ', g.ACE('C', 'A'))
 
+cde = g.CDE('A', 'C')
+print('Controlled Direct Effect(A, C) = ', cde)
+print('Indirect Effect (A, C)', ace - cde)
 #results = g.TestModel()
 #conf = results[0]
 #print('\nConfidence = ', round(conf * 100, 1), '%, testPerType = ', results[2], ', errsPerType = ', results[3])

@@ -1,4 +1,5 @@
 import numpy as np
+from math import sqrt
 
 class PDF:
     """ Construct the PDF from a list of bins, where a bin is defined as:
@@ -41,6 +42,22 @@ class PDF:
 
         exp = cum
         return exp
+
+    def stDev(self):
+        mean = self.E()
+        cum = 0.0
+        for i in range(self.binCount):
+            bin = self.bins[i]
+            id, min, max, prob = bin
+            if self.isDiscrete:
+                value = min
+            else:
+                value = (min + max) / 2
+            
+            cum += prob * (value - mean)**2
+        var = cum
+        std = sqrt(var)
+        return std
 
     def ToHistogram(self):
         """Convert the pdf to a numpy array of probabilities [P(bin1), ..., P(binN)]"""

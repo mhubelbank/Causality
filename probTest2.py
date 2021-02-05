@@ -14,6 +14,7 @@ def run(filename):
     print('stats(C) = ', samp.fieldStats('C'))
     print('values(B) = ', samp.getMidpoints('B'))
     print('E(A) = ', samp.distr('A').E())
+    print('stDev(A) = ', samp.distr('A').stDev())
     print('E(C) = ', samp.distr('C').E())
     print('E(B) = ', samp.distr('B').E())
     print('P(B=0) = ', samp.P('B', 0))
