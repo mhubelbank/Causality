@@ -2,6 +2,7 @@ from Probability.Prob import Sample
 from synth import getData
 import sys
 
+
 def run(filename):
     r = getData.DataReader(filename)
     dat = r.read()
@@ -12,6 +13,7 @@ def run(filename):
     print('stats(B) =  ', samp.fieldStats('B'))
     print('stats(A) =  ', samp.fieldStats('A'))
     print('stats(C) = ', samp.fieldStats('C'))
+
     print('values(B) = ', samp.getMidpoints('B'))
     print('E(A) = ', samp.distr('A').E())
     print('stDev(A) = ', samp.distr('A').stDev())

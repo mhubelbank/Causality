@@ -1,3 +1,5 @@
+from Probability import Prob
+
 # Tests for independence between two sets of variables,
 # optionally given a third set.
 # X, Y, and Z are each a list of data series', one series
@@ -42,7 +44,27 @@ def testSDCIT(X, Y, Z=[]):
     #print('p = ', p_value)
     return p_value
 
+def testProb(X, Y, Z=[], level=2):
+    X = X[0]
+    Y = Y[0]
+    d = {}
+    d['X'] = X
+    d['Y'] = Y
+    zNames = []
+    for i in range(len(Z)):
+        varName = 'Z' + str(i)
+        d[varName] = Z[i]
+        zNames.append(varName)
+    s = Prob.Sample(d, .2)
+    dep = s.dependence('X', 'Y', zNames, level=level)
+    print('dep = ', dep)
+    if dep <= .15:
+        return 1.0
+    else:
+        return 0
+
 def test(X, Y, Z=[]):
-    p_val = testFCIT(X, Y, Z)
+    #p_val = testFCIT(X, Y, Z)
+    p_val = testProb(X, Y, Z, level = 2)
     #p_val = testSDCIT(X, Y, Z)
     return p_val

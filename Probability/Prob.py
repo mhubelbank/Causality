@@ -241,7 +241,7 @@ class Sample:
                 start = edges[i]
                 end = edges[i+1]
                 pdfSpec.append((i, start, end, outHist[i]))
-            outPDF = PDF(pdfSpec, isDiscrete=isDiscrete)
+            outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete)
             return outPDF
         else:
             # Conditional Probability
@@ -303,11 +303,172 @@ class Sample:
                     newprob = accum[i]
                     newBin = pdfBin[:-1] + (newprob,)
                     outSpecs.append(newBin)
-                outPDF = PDF(outSpecs, isDiscrete = isDiscrete)
+                outPDF = PDF(self.N, outSpecs, isDiscrete = isDiscrete)
             return outPDF
 
     PD = distr
+
+    def getTestCondSpecs(self, testVars, testPoints):
+        def getTestVals(self, rv):
+            isDiscrete = self.isDiscrete(rvName)
+            if isDiscrete or testPoints is None:
+                # If is Discrete, return all values
+                testVals = self.getMidpoints(rv)
+            else:
+                # If continuous, sample values at testPoint distances from the mean
+                testVals = []
+                p = self.distr(rv)
+                mean = p.E()
+                std = p.stDev()
+                for tp in testPoints:
+                    if tp == 0:
+                        # For 0, just use the mean
+                        testVals.append(mean)
+                    else:
+                        # For nonzero, test points mean + tp and mean - tp
+                        testVals.append(mean - tp * std)
+                        testVals.append(mean + tp * std)
+            return testVals
+        # Find values for each variable based on testPoints
+        nVars = len(testVars)
+        rvName = testVars[0]
+        if nVars == 1:
+            # Only one var to do.  Find the values.
+            vals = getTestVals(self, rvName)
+            return [[(rvName, val)] for val in vals]
+        else:
+            # We're not on the last var, so recurse and build up the total set
+            accum = []
+            vals = getTestVals(self, rvName)
+            childVals = self.getTestCondSpecs(testVars[1:], testPoints) # Recurse to get the child values
+            for val in vals:
+                accum += [[(rvName, val)] + childVal for childVal in childVals]
+            return accum
+
+
+    def dependence(self, rv1, rv2, givens=[], level = 3):
+        d1 = self.dependence2(rv1, rv2, givens, level)
+        #d2 = self.dependence2(rv2, rv1, givens, level)
+        #return (d1 + d2) / 2.0
+        #return max([d1, d2])
+        return d1
+
+    def dependence2(self, rv1, rv2, givens=[], level = 3):
+        """ givens is [given1, given2, ... , givenN]
+        """
+        accum = 0.0
+        accumProb = 0.0
+        # Get all the combinations of rv1, rv2, and any givens
+        # Depending on level, we test more combinations.  If level >= 100, we test all combos
+        # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
+        # For level = 3, we test the mean + 6 more values.
+        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        maxLevel = 3
+        if level <= 8:
+            levelSpecs = levelSpecs0
+        elif level < 100:
+            levelSpecs = range(1/level, maxLevel + 1/levelD, 1/level)
+        else:
+            levelSpecs = None
+        if levelSpecs:
+            testPoints = [0] + levelSpecs[:level]
+        else:
+            # TestPoints None means test all values
+            testPoints = None
+        condFiltSpecs = self.getTestCondSpecs(givens + [rv2], testPoints)
+        prevGivensSpec = None
+        prevProb1 = None
+        numTests = 0
+        #print('condFiltSpecs = ', condFiltSpecs)
+        for spec in condFiltSpecs:
+            #print('spec = ', spec)
+            # Compare P(Y | Z) with P(Y | X,Z)
+            # givensSpec is conditional on givens without rv2
+            givensSpec = spec[:-1]
+            if givensSpec != prevGivensSpec:
+                # Only recompute prob 1 when givensValues change
+                #print('givensSpec = ', givensSpec)
+                if givensSpec:
+                    prob1 = self.distr(rv1, givensSpec)
+                else:
+                    prob1 = self.distr(rv1)
+            else:
+                # Otherwise use the previously computed prob1
+                prob1 = prevProb1
+            prob2 = self.distr(rv1, spec)
+
+            if prob2.N < 5:
+                continue
+            prevGivensSpec = givensSpec
+            prevProb1 = prob1
+            mean1 = prob1.E()
+            mean2 = prob2.E()
+            dep1 = abs((mean1 - mean2))
+            std1 = prob1.stDev()
+            std2 = prob2.stDev()
+            dep2 = std1 - std2
+            if not self.isDiscrete(rv1):
+                sk1 = prob1.skew()
+                sk2 = prob2.skew()
+                dep3 = abs((sk1 - sk2))
+                dep4 = abs(prob1.kurtosis() - prob2.kurtosis())
+                tp1 = mean1 + std1
+                tp2 = mean1 - std1
+                tp3 = mean1 + std1 / 2.0
+                tp4 = mean1 - std1 / 2.0
+                p1_1 = prob1.P(tp1)
+                p1_2 = prob1.P(tp2)
+                p1_3 = prob1.P(tp3)
+                p1_4 = prob1.P(tp4)
+                p2_1 = prob2.P(tp1)
+                p2_2 = prob2.P(tp2)
+                p2_3 = prob2.P(tp3)
+                p2_4 = prob2.P(tp4)
+                #dep1 = abs((p1_1 - p2_1)/(p1_1 + p2_1))
+                #dep2 = abs((p1_2 - p2_2)/(p1_2 + p2_2))
+                #dep3 = abs((p1_3 - p2_3)/(p1_3 + p2_3))
+                #dep4 = abs((p1_4 - p2_4)/(p1_4 + p2_4))
+                #dep4 = 0.0
+                #print('std1, std2, sk1, sk2) = ', std1, std2, sk1, sk2)
+            else:
+                dep1 = prob1.compare(prob2)
+                dep2 = dep3 = dep4 = 0.0
+            #print('mean, std, skew = ', dep1, dep2, dep3)
+            dep = max([dep1, dep2, dep3, dep4])
+            # We accumulate any measured dependency multiplied by the probability of the conditional
+            # clause.  This way, we weight the dependency by the frequency of the event.
+            condProb = self.jointProb(spec)
+            accum += dep * condProb
+            accumProb += condProb # The total probability space assessed
+            numTests += 1
+            #print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
+        if accumProb > 0.0:
+            # Normalize the results for the probability space sampled by dividing by accumProb
+            dependence = accum / accumProb 
+            return dependence
+        print('Cond distr too small: ', rv1, rv2, givens)
+        return 0.0
     
+    def dependence_orig(self, rv1, rv2, givens=[], level = 3):
+        """ givens is [given1, given2, ... , givenN]
+        """
+        accum = 0.0
+        # Get all the combinations of rv1, rv2, and any givens
+        condFiltSpecs = self.jointCondSpecs([rv1, rv2] + givens)
+        for spec in condFiltSpecs:
+            conds = list(spec[2:])
+            prob1 = self.prob(rv1, spec[0][1], conds)
+            prob2 = self.prob(rv2, spec[1][1], conds)
+            if conds:
+                jointProb = self.jointProb(spec) / self.jointProb(conds)
+            else:
+                jointProb = self.jointProb(spec[:2])
+            dep = prob1 * prob2 - jointProb
+            accum += abs(dep)
+            print('spec = ', spec, ', dep = ', dep)
+        return accum 
+
+
     def jointValues(self, rvList):
         """ Return a list of the joint distribution values for a set of variables.
             I.e. [(rv1Val, rv2Val, ... , rvNVal)] for every combination of bin values.

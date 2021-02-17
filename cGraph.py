@@ -38,7 +38,7 @@ class cGraph:
             else:
                 self.edgeDict[d] = [edge]
         # Create a probability sample object for later use
-        self.prob = Prob.Sample(self.data)
+        self.prob = Prob.Sample(self.data, density = .2)
         for rvName in self.rvList:
             rv = self.rvDict[rvName]
             if rv.isObserved:
@@ -66,6 +66,13 @@ class cGraph:
     def isChild(self, parentNode, childNode):
         if parentNode in self.getParents(childNode):
             return True
+        return False
+
+    def isAdjacent(self, node1, node2):
+        adj = self.getAdjacencies(node1)
+        for a in adj:
+            if a[0] == node2 or a[1] == node2:
+                return True
         return False
 
     def combinations(self, inSet):
@@ -122,7 +129,8 @@ class cGraph:
                 node2 = nodes[j]
                 if node1 == node2 or not self.rvDict[node2].isObserved:
                     continue
-                isSeparated = networkx.d_separated(self.g, {node1}, {node2}, {})
+                isAdjacent = self.isAdjacent(node1, node2)
+                isSeparated = not isAdjacent and networkx.d_separated(self.g, {node1}, {node2}, {})
                 dep = self.makeDependency(node1, node2, None, not isSeparated)
                 deps.append(dep)
                 for c in cNodes:
@@ -136,7 +144,7 @@ class cGraph:
                             break
                     if not allObserved:
                         continue
-                    isSeparated = networkx.d_separated(self.g, {node1}, {node2}, set(c))
+                    isSeparated = not isAdjacent and networkx.d_separated(self.g, {node1}, {node2}, set(c))
                     dep = self.makeDependency(node1, node2, c, not isSeparated)
                     deps.append(dep)
         return deps
@@ -216,6 +224,7 @@ class cGraph:
                 pval = independence.test([X], [Y], Z)
             else:
                 pval = independence.test([X], [Y])
+            print(x, y, zlist)
             errStr = None
             testType = -1
             if not Z and self.isExogenous(x) and self.isExogenous(y):
@@ -236,6 +245,7 @@ class cGraph:
             if errStr:
                 if VERBOSE:
                     print('***', errStr)
+                    #5/0
                 errors.append((testType, [x], [y], list(zlist), isDep, pval, errStr))
                 numErrsPerType[testType] += 1
             elif VERBOSE:
@@ -396,7 +406,7 @@ class cGraph:
 
     def findFrontdoorBlockingSet(self, source, target):
         backdoorSet = self.findBackdoorBlockingSet(source, target)
-        maxBlocking = 3
+        maxBlocking = 2
         bSet = []
         # Create a graph view that removes the direct link from the source to the destination
         def includeEdge(s, d):
@@ -444,7 +454,7 @@ class cGraph:
             testSet = set(list(nodeSet) + list(backdoorSet))
             #print('testSet = ', list(testSet))
             if networkx.d_separated(vg, {source}, {target}, testSet):
-                bSet = list(testSet)
+                bSet = list(nodeSet)
                 break
 
         print('FDblocking = ', bSet)

@@ -3,6 +3,7 @@ import rv
 import cGraph
 from synth import getData
 import independence
+import time
 
 args = sys.argv
 if (len(args) > 1):
@@ -12,6 +13,7 @@ f = open(test, 'r')
 exec(f.read(), globals())
 
 print('Testing: ', test, '--', testDescript)
+start = time.time()
 gnodes = []
 # 'model' is set when the text file is exec'ed
 for var in model:
@@ -46,3 +48,6 @@ results = g.TestModel()
 conf = results[0]
 print('\nConfidence = ', round(conf * 100, 1), '%, testPerType = ', results[2], ', errsPerType = ', results[3])
 print('TestResults = ', results)
+end = time.time()
+duration = end - start
+print('Test Time = ', round(duration))
