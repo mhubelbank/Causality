@@ -2,7 +2,7 @@
 
 The HPCC Systems Causality Framework is currently under development.  This repository provides a Python module that implements all of the relevant algorithms for causal model representation, validation, causal inference, and ultimately counterfactual inference.  It incudes a synthetic data generation capability, used for testing the algorithms, and for probing their power against various scenarios.  This repository can be used as a stand-alone framework.  It will also be used to provide local processing
 for a parallelized causality framework on HPCC Systems supercomputing clusters.
-For details on Casality, Causal Inference, and the various causality algorithms, please see the References section below.
+For details on Causality, Causal Inference, and the various causality algorithms, please see the References section below.
 
 ## Causal Methods
 
@@ -15,7 +15,7 @@ _cGraph.py_ (Causal Graph) is the heart of the system.  It accepts a multivariat
 
 ## Conditional Probability
 
-Probability/Prob.py provides a powerful conditional probability analysis system.  It equally supports both discrete (including categorical) and continous data, or any mixture of the two.  Given a set of data, Prob allows a wide range of queries including:
+_Probability/Prob.py_ provides a powerful conditional probability analysis system.  It equally supports both discrete (including categorical) and continous data, or any mixture of the two.  Given a set of data, Prob allows a wide range of queries including:
 - P(X=x) -- The numeric probability that X takes on the value x.
 - P(X) -- The probability distribution of any variable X.  Presented as a PDF (Probability Distribution Function), which is actually a discretized version of the probability distribution.
 - P(Y | X=x) -- The probability distribution of Y given that X is observed to have the value x.
@@ -61,7 +61,10 @@ The "models" folder contains various test models including a set of standard tes
         python3 cTest.py models/M3.py
         python3 cTest.py models/M3.py [10000]
 
-        If <numRecords> is not provided then all generated records will be used.  If <numRecords> is provided, it will take a sample of <numRecords> from the generated data.  If <numRecords> is greater than or equal to the number of generated records, then all records will be used.
+
+If <numRecords> is not provided then all generated records will be used.
+If <numRecords> is provided, it will take a sample of <numRecords> from the generated data.  
+If <numRecords> is greater than or equal to the number of generated records, then all records will be used.
 
 
 ## Other command-line programs:
