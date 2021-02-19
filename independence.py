@@ -65,6 +65,6 @@ def testProb(X, Y, Z=[], level=2):
 
 def test(X, Y, Z=[]):
     #p_val = testFCIT(X, Y, Z)
-    p_val = testProb(X, Y, Z, level = 2)
+    p_val = testProb(X, Y, Z, level = 1)
     #p_val = testSDCIT(X, Y, Z)
     return p_val

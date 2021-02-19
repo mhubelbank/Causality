@@ -353,6 +353,93 @@ class Sample:
         #return max([d1, d2])
         return d1
 
+    def dependence2_new(self, rv1, rv2, givens=[], level = 3):
+        """ givens is [given1, given2, ... , givenN]
+        """
+        accum = 0.0
+        accumProb = 0.0
+        # Get all the combinations of rv1, rv2, and any givens
+        # Depending on level, we test more combinations.  If level >= 100, we test all combos
+        # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
+        # For level = 3, we test the mean + 6 more values.
+        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        maxLevel = 3
+        if level <= 8:
+            levelSpecs = levelSpecs0
+        elif level < 100:
+            levelSpecs = range(1/level, maxLevel + 1/levelD, 1/level)
+        else:
+            levelSpecs = None
+        if levelSpecs:
+            testPoints = [0] + levelSpecs[:level]
+        else:
+            # TestPoints None means test all values
+            testPoints = None
+        condFiltSpecs = self.getTestCondSpecs(givens + [rv2], testPoints)
+        prevGivensSpec = None
+        prevProb1 = None
+        testVals = []
+        numTests = 0
+        #print('condFiltSpecs = ', condFiltSpecs)
+        for spec in condFiltSpecs:
+            #print('spec = ', spec)
+            # Compare P(Y | Z) with P(Y | X,Z)
+            # givensSpec is conditional on givens without rv2
+            givensSpec = spec[:-1]
+            if givensSpec != prevGivensSpec:
+                # Only recompute prob 1 when givensValues change
+                #print('givensSpec = ', givensSpec)
+                if givensSpec:
+                    prob1 = self.distr(rv1, givensSpec)
+                else:
+                    prob1 = self.distr(rv1)
+                mean = prob1.E()
+                std = prob1.stDev()
+                for testPoint in testPoints:
+                    testVals.append(mean + (std * testPoint))
+                    if testPoint > 0:
+                        # Don't test mean twice.  Otherwise do + / - testPoint
+                        testVals.append(mean - (std * testPoint))
+            else:
+                # Otherwise use the previously computed prob1
+                prob1 = prevProb1
+            prob2 = self.distr(rv1, spec)
+
+            if prob2.N < 5:
+                continue
+            prevGivensSpec = givensSpec
+            prevProb1 = prob1
+            deps = []
+            allProbs = 0.0
+            if not self.isDiscrete(rv1):
+                for testVal in testVals:
+                    p1Test = prob1.P(testVal)
+                    p2Test = prob2.P(testVal)
+                    err = abs((p1Test - p2Test) / (p1Test + p2Test)) * p1Test if p1Test + p2Test > 0 else 0.0
+                    allProbs += p1Test
+                    deps.append(err)
+                # Rescale deps by the total probability measured
+                deps = [dep / allProbs for dep in deps]
+            else:
+                err = prob1.compare(prob2)
+                deps.append(err)
+            #print('mean, std, skew = ', dep1, dep2, dep3)
+            dep = max(deps)
+            dep = sum(deps) / len(deps)
+            # We accumulate any measured dependency multiplied by the probability of the conditional
+            # clause.  This way, we weight the dependency by the frequency of the event.
+            condProb = self.jointProb(spec)
+            accum += dep * condProb
+            accumProb += condProb # The total probability space assessed
+            numTests += 1
+            #print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
+        if accumProb > 0.0:
+            # Normalize the results for the probability space sampled by dividing by accumProb
+            dependence = accum / accumProb 
+            return dependence
+        print('Cond distr too small: ', rv1, rv2, givens)
+        return 0.0
+
     def dependence2(self, rv1, rv2, givens=[], level = 3):
         """ givens is [given1, given2, ... , givenN]
         """
@@ -363,6 +450,7 @@ class Sample:
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
         levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        #levelSpecs0 = [.1, .2, .3, .4, .5, .75, 1.0, 1.5, 2.0]
         maxLevel = 3
         if level <= 8:
             levelSpecs = levelSpecs0
@@ -406,12 +494,14 @@ class Sample:
             dep1 = abs((mean1 - mean2))
             std1 = prob1.stDev()
             std2 = prob2.stDev()
-            dep2 = std1 - std2
+            dep2 = abs((std1 - std2) / (std1 + std2))
             if not self.isDiscrete(rv1):
                 sk1 = prob1.skew()
                 sk2 = prob2.skew()
+                ku1 = prob1.kurtosis()
+                ku2 = prob2.kurtosis()
                 dep3 = abs((sk1 - sk2))
-                dep4 = abs(prob1.kurtosis() - prob2.kurtosis())
+                dep4 = abs((ku1 - ku2))
                 tp1 = mean1 + std1
                 tp2 = mean1 - std1
                 tp3 = mean1 + std1 / 2.0
@@ -424,10 +514,10 @@ class Sample:
                 p2_2 = prob2.P(tp2)
                 p2_3 = prob2.P(tp3)
                 p2_4 = prob2.P(tp4)
-                #dep1 = abs((p1_1 - p2_1)/(p1_1 + p2_1))
-                #dep2 = abs((p1_2 - p2_2)/(p1_2 + p2_2))
-                #dep3 = abs((p1_3 - p2_3)/(p1_3 + p2_3))
-                #dep4 = abs((p1_4 - p2_4)/(p1_4 + p2_4))
+                #dep1 = abs((p1_1 - p2_1)/(p1_1 + p2_1)) if p1_1 + p2_1 > 0 else 0.0
+                #dep2 = abs((p1_2 - p2_2)/(p1_2 + p2_2)) if p1_2 + p2_2 > 0 else 0.0
+                #dep3 = abs((p1_3 - p2_3)/(p1_3 + p2_3)) if p1_3 + p2_3 > 0 else 0.0
+                #dep4 = abs((p1_4 - p2_4)/(p1_4 + p2_4)) if p1_4 + p2_4 > 0 else 0.0
                 #dep4 = 0.0
                 #print('std1, std2, sk1, sk2) = ', std1, std2, sk1, sk2)
             else:
@@ -444,30 +534,10 @@ class Sample:
             #print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
-            dependence = accum / accumProb 
+            dependence = accum / accumProb
             return dependence
         print('Cond distr too small: ', rv1, rv2, givens)
         return 0.0
-    
-    def dependence_orig(self, rv1, rv2, givens=[], level = 3):
-        """ givens is [given1, given2, ... , givenN]
-        """
-        accum = 0.0
-        # Get all the combinations of rv1, rv2, and any givens
-        condFiltSpecs = self.jointCondSpecs([rv1, rv2] + givens)
-        for spec in condFiltSpecs:
-            conds = list(spec[2:])
-            prob1 = self.prob(rv1, spec[0][1], conds)
-            prob2 = self.prob(rv2, spec[1][1], conds)
-            if conds:
-                jointProb = self.jointProb(spec) / self.jointProb(conds)
-            else:
-                jointProb = self.jointProb(spec[:2])
-            dep = prob1 * prob2 - jointProb
-            accum += abs(dep)
-            print('spec = ', spec, ', dep = ', dep)
-        return accum 
-
 
     def jointValues(self, rvList):
         """ Return a list of the joint distribution values for a set of variables.
