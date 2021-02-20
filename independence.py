@@ -44,7 +44,7 @@ def testSDCIT(X, Y, Z=[]):
     #print('p = ', p_value)
     return p_value
 
-def testProb(X, Y, Z=[], level=2):
+def testProb(X, Y, Z=[], precision=2):
     X = X[0]
     Y = Y[0]
     d = {}
@@ -56,7 +56,7 @@ def testProb(X, Y, Z=[], level=2):
         d[varName] = Z[i]
         zNames.append(varName)
     s = Prob.Sample(d, .2)
-    dep = s.dependence('X', 'Y', zNames, level=level)
+    dep = s.dependence('X', 'Y', zNames, precision=precision)
     print('dep = ', dep)
     if dep <= .15:
         return 1.0
@@ -65,6 +65,6 @@ def testProb(X, Y, Z=[], level=2):
 
 def test(X, Y, Z=[]):
     #p_val = testFCIT(X, Y, Z)
-    p_val = testProb(X, Y, Z, level = 1)
+    p_val = testProb(X, Y, Z, precision = 1)
     #p_val = testSDCIT(X, Y, Z)
     return p_val

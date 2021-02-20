@@ -6,7 +6,8 @@ from Probability.pdf import PDF
 VERBOSE = False
 
 class Sample:
-    def __init__(self, ds, density = 1.0, discSpecs = None):
+    global PRECISION
+    def __init__(self, ds, density = 1.0, discSpecs = None, precision=2):
         """ Create a probability sample object.  Sample provides a mechanism for analyzing
             the probability space of a multivariate dataset.
             It can handle discrete as well as continuous variables.  Continuous probabilities
@@ -23,6 +24,7 @@ class Sample:
             The discSpecs parameter is used to make recursive calls to the module while
             maintaining the discretization information, and should not be provided by the user.
         """
+        self.precision = precision
         self.ds = ds
         self.density = density
         self.fieldList = list(ds.keys())
@@ -147,8 +149,9 @@ class Sample:
         return range(bucketCount)
 
     def filter(self, filtSpecs):
+        """ Filter the data based on a set of filterspecs: [(varName, value), ...]"""
         filtSpecs2 = []
-        # Transform filtSpecs from (fieldName, value) to (fieldIndex, discretizedValue)
+        # Transform filtSpecs from (varName, value) to (varIndex, discretizedValue)
         for filt in filtSpecs:
             field, value = filt
             indx = self.fieldIndex[field]
@@ -166,9 +169,9 @@ class Sample:
                     break
             if not include:
                 remRecs.append(i)
-
+        # Remove all the non included rows
         filtered = np.delete(self.aData, remRecs, 1)
-        # Now convert to orginal format, with only ecords that passed filter
+        # Now convert to orginal format, with only records that passed filter
         orgFilt = self.toOriginalForm(filtered)
         return orgFilt
 
@@ -190,7 +193,7 @@ class Sample:
 
     P = prob
 
-    def distr(self, rvName, givenSpecs = None):
+    def distr(self, rvName, givenSpecs=None, precision=None):
         """Return a probability distribution as a PDF (see pdf.py) for the random variable
            indicated by rvName.
            If givenSpecs is provided, then will return the conditional distribution,
@@ -215,6 +218,8 @@ class Sample:
         """
         if VERBOSE:
             print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
+        if precision is None:
+            precision = self.precision
         isDiscrete = self.isDiscrete(rvName)
         indx = self.fieldIndex[rvName]
         dSpec = self.discSpecs[indx]
@@ -273,10 +278,11 @@ class Sample:
                 conditionalizeOn = []
                 for given in condSpecs:
                     conditionalizeOn.append(given)
-                condfiltSpecs = self.jointCondSpecs(conditionalizeOn)
+                condfiltSpecs = self.getCondSpecs(conditionalizeOn, precision)
                 #print('filtSpecs = ', filtSpecs)
                 #countRatio = float(self.N) / filtSample.N
                 #print('countRatio = ', countRatio)
+                allProbs = 0.0 # The fraction of the probability space that has been tested.
                 for cf in condfiltSpecs:
                     totalF = filtSpecs + cf
                     #print('totalF = ', totalF)
@@ -292,6 +298,8 @@ class Sample:
                     probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
                     #print('f = ', totalF, 'probs = ', probs)
                     accum += probs
+                    allProbs += probZ
+                accum = accum / allProbs
                 #print('accum = ', accum, sum(accum))
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
@@ -308,7 +316,26 @@ class Sample:
 
     PD = distr
 
-    def getTestCondSpecs(self, testVars, testPoints):
+    def getCondSpecs(self, condVars, precision=2):
+        """ Produce a set of conditional specifications for stochastic
+            conditionalization, given
+            a set of variables to conditionalize on, and a desired precision level.
+            Precision determines how many points to use to conditionalize on.
+            Zero indicates conditionalize on the mean alone. 1 uses the mean
+            and two other points (one on either side of the mean).
+            2 Uses the mean plus 4 other points (2 on each side of the mean).
+            Precision values (p) less than 100 will test p * 2 + 1 values for each
+            variable.
+            Precision value > 100 indicates that all values will be tested,
+            which can be extremely processor intensive.
+            Conditional specifications provide a list of lists of tuple:
+            [[(varName1, value1_1), (varName2, value2_1), ... (varNameK, valueK_1)],
+             [(varName1, value1_2), (varName2, value2_2), ... (varNameK, valueK_2)],
+             ...
+             [(varName1, value1_N), (varName2, value2_N), ... (varNameK, valueK_N)]]
+            Where K is the number of conditional variables, and N is the total number
+            of combinations = K**(2 * P + 1) for values of P < 100.
+            """
         def getTestVals(self, rv):
             isDiscrete = self.isDiscrete(rvName)
             if isDiscrete or testPoints is None:
@@ -329,9 +356,23 @@ class Sample:
                         testVals.append(mean - tp * std)
                         testVals.append(mean + tp * std)
             return testVals
+        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        maxLevel = 3 # Largest standard deviation to sample
+        if precision <= 8:
+            levelSpecs = levelSpecs0
+        elif precision < 100:
+            levelSpecs = range(1/precision, maxLevel + 1/precision, 1/precision)
+        else:
+            levelSpecs = None
+        if levelSpecs:
+            testPoints = [0] + levelSpecs[:precision]
+        else:
+            # TestPoints None means test all values
+            testPoints = None
+
         # Find values for each variable based on testPoints
-        nVars = len(testVars)
-        rvName = testVars[0]
+        nVars = len(condVars)
+        rvName = condVars[0]
         if nVars == 1:
             # Only one var to do.  Find the values.
             vals = getTestVals(self, rvName)
@@ -340,42 +381,24 @@ class Sample:
             # We're not on the last var, so recurse and build up the total set
             accum = []
             vals = getTestVals(self, rvName)
-            childVals = self.getTestCondSpecs(testVars[1:], testPoints) # Recurse to get the child values
+            childVals = self.getCondSpecs(condVars[1:], precision) # Recurse to get the child values
             for val in vals:
                 accum += [[(rvName, val)] + childVal for childVal in childVals]
             return accum
 
-
-    def dependence(self, rv1, rv2, givens=[], level = 3):
-        d1 = self.dependence2(rv1, rv2, givens, level)
-        #d2 = self.dependence2(rv2, rv1, givens, level)
-        #return (d1 + d2) / 2.0
-        #return max([d1, d2])
-        return d1
-
-    def dependence2_new(self, rv1, rv2, givens=[], level = 3):
+    def dependence_new(self, rv1, rv2, givens=[], precision = None):
         """ givens is [given1, given2, ... , givenN]
         """
+        if precision is None:
+            precision = self.precision
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
-        # Depending on level, we test more combinations.  If level >= 100, we test all combos
+        # Depending on precision, we test more combinations.  If level >= 100, we test all combos
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
-        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
-        maxLevel = 3
-        if level <= 8:
-            levelSpecs = levelSpecs0
-        elif level < 100:
-            levelSpecs = range(1/level, maxLevel + 1/levelD, 1/level)
-        else:
-            levelSpecs = None
-        if levelSpecs:
-            testPoints = [0] + levelSpecs[:level]
-        else:
-            # TestPoints None means test all values
-            testPoints = None
-        condFiltSpecs = self.getTestCondSpecs(givens + [rv2], testPoints)
+
+        condFiltSpecs = self.getCondSpecs(givens + [rv2], precision)
         prevGivensSpec = None
         prevProb1 = None
         testVals = []
@@ -393,13 +416,8 @@ class Sample:
                     prob1 = self.distr(rv1, givensSpec)
                 else:
                     prob1 = self.distr(rv1)
-                mean = prob1.E()
-                std = prob1.stDev()
-                for testPoint in testPoints:
-                    testVals.append(mean + (std * testPoint))
-                    if testPoint > 0:
-                        # Don't test mean twice.  Otherwise do + / - testPoint
-                        testVals.append(mean - (std * testPoint))
+                testVals0 = self.getCondSpecs([rv1], precision)
+                testVals = [tv[1] for tv in testVals0]
             else:
                 # Otherwise use the previously computed prob1
                 prob1 = prevProb1
@@ -440,30 +458,18 @@ class Sample:
         print('Cond distr too small: ', rv1, rv2, givens)
         return 0.0
 
-    def dependence2(self, rv1, rv2, givens=[], level = 3):
+    def dependence(self, rv1, rv2, givens=[], precision=None):
         """ givens is [given1, given2, ... , givenN]
         """
+        if precision is None:
+            precision = self.precision
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
         # Depending on level, we test more combinations.  If level >= 100, we test all combos
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
-        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
-        #levelSpecs0 = [.1, .2, .3, .4, .5, .75, 1.0, 1.5, 2.0]
-        maxLevel = 3
-        if level <= 8:
-            levelSpecs = levelSpecs0
-        elif level < 100:
-            levelSpecs = range(1/level, maxLevel + 1/levelD, 1/level)
-        else:
-            levelSpecs = None
-        if levelSpecs:
-            testPoints = [0] + levelSpecs[:level]
-        else:
-            # TestPoints None means test all values
-            testPoints = None
-        condFiltSpecs = self.getTestCondSpecs(givens + [rv2], testPoints)
+        condFiltSpecs = self.getCondSpecs(givens + [rv2], precision)
         prevGivensSpec = None
         prevProb1 = None
         numTests = 0
@@ -502,23 +508,6 @@ class Sample:
                 ku2 = prob2.kurtosis()
                 dep3 = abs((sk1 - sk2))
                 dep4 = abs((ku1 - ku2))
-                tp1 = mean1 + std1
-                tp2 = mean1 - std1
-                tp3 = mean1 + std1 / 2.0
-                tp4 = mean1 - std1 / 2.0
-                p1_1 = prob1.P(tp1)
-                p1_2 = prob1.P(tp2)
-                p1_3 = prob1.P(tp3)
-                p1_4 = prob1.P(tp4)
-                p2_1 = prob2.P(tp1)
-                p2_2 = prob2.P(tp2)
-                p2_3 = prob2.P(tp3)
-                p2_4 = prob2.P(tp4)
-                #dep1 = abs((p1_1 - p2_1)/(p1_1 + p2_1)) if p1_1 + p2_1 > 0 else 0.0
-                #dep2 = abs((p1_2 - p2_2)/(p1_2 + p2_2)) if p1_2 + p2_2 > 0 else 0.0
-                #dep3 = abs((p1_3 - p2_3)/(p1_3 + p2_3)) if p1_3 + p2_3 > 0 else 0.0
-                #dep4 = abs((p1_4 - p2_4)/(p1_4 + p2_4)) if p1_4 + p2_4 > 0 else 0.0
-                #dep4 = 0.0
                 #print('std1, std2, sk1, sk2) = ', std1, std2, sk1, sk2)
             else:
                 dep1 = prob1.compare(prob2)
