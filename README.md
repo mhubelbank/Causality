@@ -4,6 +4,14 @@ The HPCC Systems Causality Framework is currently under development.  This repos
 for a parallelized causality framework on HPCC Systems supercomputing clusters.
 For details on Causality, Causal Inference, and the various causality algorithms, please see the References section below.
 
+## Installation
+### Prerequisites
+- Python3
+- numpy
+### Procedure
+- Clone repository
+- Add your repository to pythonpath or work within the repository.
+
 ## Causal Methods
 
 _cGraph.py_ (Causal Graph) is the heart of the system.  It accepts a multivariate dataset as well as a Causal Model (aka Path Diagram) that is thought to correspond to the causal process that produced the data.  The Causal Model is a Directed Acyclic Graph that represents the best hypothesis of the causal process that underlies the generation of the provided dataset.  The Causal Model may contain "unobserved" variables as well as the "observed" variables with their corresponding datasets.  It includes the following functional areas:
@@ -62,9 +70,9 @@ The "models" folder contains various test models including a set of standard tes
         python3 cTest.py models/M3.py [10000]
 
 
-If <numRecords> is not provided then all generated records will be used.
-If <numRecords> is provided, it will take a sample of <numRecords> from the generated data.  
-If <numRecords> is greater than or equal to the number of generated records, then all records will be used.
+    If <numRecords> is not provided then all generated records will be used.
+    If <numRecords> is provided, it will take a sample of <numRecords> from the generated data.  
+    If <numRecords> is greater than or equal to the number of generated records, then all records will be used.
 
 
 ## Other command-line programs:
