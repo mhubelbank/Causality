@@ -20,9 +20,9 @@ model =    [('A', []),
 			]
 
 varEquations = [
-			    'A = exponential() * 10',
-			    'C = normal(0,20)',
-			    'B = A + C + logistic(0, 10)',
+			    'A = logistic(5,3)',
+			    'C = logistic(0,3)',
+			    'B = A + C + logistic(0, 6)',
 		        ]
 
 

@@ -1,4 +1,5 @@
 from Probability import Prob
+from standardize import standardize
 
 # Tests for independence between two sets of variables,
 # optionally given a third set.
@@ -48,12 +49,12 @@ def testProb(X, Y, Z=[], precision=2):
     X = X[0]
     Y = Y[0]
     d = {}
-    d['X'] = X
-    d['Y'] = Y
+    d['X'] = standardize(X)
+    d['Y'] = standardize(Y)
     zNames = []
     for i in range(len(Z)):
         varName = 'Z' + str(i)
-        d[varName] = Z[i]
+        d[varName] = standardize(Z[i])
         zNames.append(varName)
     s = Prob.Sample(d, .2)
     dep = s.dependence('X', 'Y', zNames, precision=precision)

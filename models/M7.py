@@ -25,12 +25,12 @@ model = [   ('B', []),
 
 varEquations = [
 			    #'B = math.sin((t % 365) / 365 * 6.28) * 50 + 40 + normal(0, 5)',
-                'B = exponential() * 50',
-                'F = normal(5, 2)',
+                'B = exponential()',
+                'F = logistic(5, 2)',
                 'G = logistic(55, 10)',
 			    'A = .5 * B + .3 * F + exponential()',
                 'D = .25 * A + .35 * G + logistic(0,5)',
- 			    'C = .25 * B + .2 * D + normal(0, 5)',
+ 			    'C = .1 * B + .2 * D + normal(0, 5)',
                 'E = .5 * C + logistic(0,3)',
                 't = t + 1'
 		        ]

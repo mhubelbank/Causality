@@ -4,6 +4,7 @@ import independence
 from Probability import Prob
 from Probability import pdf
 import numpy as np
+import direction
 
 VERBOSE = 1
 # rvList is a list of random variable (rv) objects
@@ -17,7 +18,8 @@ class cGraph:
             if rv.name in self.rvDict.keys():
                 raise 'Duplicate variable name = ' + rv.name
             self.rvDict[rv.name] = rv
-        self.rvList = self.rvDict.keys()
+        self.rvList = list(self.rvDict.keys())
+        self.rvList.sort()
         self.g.add_nodes_from(self.rvDict.keys())
         edges = []
         for rv in rvList:
@@ -42,7 +44,13 @@ class cGraph:
         for rvName in self.rvList:
             rv = self.rvDict[rvName]
             if rv.isObserved:
-                print('E(', rv.name, ') = ', self.prob.distr(rv.name).E())
+                self.vPrint(rvName)
+
+    def vPrint(self, varName):
+        """ Print statistical information about a variable"""
+        d = self.prob.distr(varName)
+        print('stats(', varName,':', 'm1 =', d.E(), ', m2 =', d.stDev(), ', m3 =',  d.skew(), ', m4 =', d.kurtosis())
+        
     def isExogenous(self, varName):
         rv = self.rvDict[varName]
         return not rv.parentNames
@@ -66,6 +74,16 @@ class cGraph:
     def isChild(self, parentNode, childNode):
         if parentNode in self.getParents(childNode):
             return True
+        return False
+
+    def isDescendant(self, ancestor, descendant):
+        parents = self.getParents(descendant)
+        if ancestor in parents:
+            return True
+        else:
+            for parent in parents:
+                 if self.isDescendant(ancestor, parent):
+                    return True
         return False
 
     def isAdjacent(self, node1, node2):
@@ -106,6 +124,7 @@ class cGraph:
         return (nDeps, nCDeps, nDeps + nCDeps)
 
     def getCombinations(self, nodes=None, order=3, minOrder = 1):
+        print ('order = ', order)
         from itertools import combinations
         if nodes is None:
             nodes = self.g.nodes()
@@ -119,7 +138,8 @@ class cGraph:
     def computeDependencies(self, order):
         deps = []
         nodes = list(self.g.nodes())
-        print('nodes = ', nodes)
+        nodes.sort()
+        #print('nodes = ', nodes, ', order = ', order)
         cNodes = self.getCombinations(nodes, order)
         for i in range(len(nodes)):
             node1 = nodes[i]
@@ -265,6 +285,89 @@ class cGraph:
         if VERBOSE:
             print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
         return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors)
+
+    def testDirection(self):
+        epsilon = .0001
+        rvList = list(self.rvList)
+        rvList.sort()
+        edges = self.g.edges
+        if VERBOSE:
+            print('Testing', len(edges), 'directionalities:')
+        errors = 0
+        for edge in edges:
+            x, y = edge
+            R = direction.direction(self.data[x], self.data[y])
+            if abs(R) > epsilon:
+                determinate = True
+                if R > 0:
+                    cause = x
+                    effect = y
+                else:
+                    cause = y
+                    effect = x
+            else:
+                determinate = False
+            shouldBe = x + ' -> ' + y
+            marker = ''
+            if VERBOSE:
+                if determinate:
+                    if cause + ' -> ' + effect != shouldBe:
+                        errors += 1
+                        marker = '***'
+                    print(marker, cause, '->', effect, ', should be: ', shouldBe, ',R = ', R)
+                else:
+                    if shouldBe != 'Indeterminate':
+                        marker = '***'
+                        errors += 1
+                    print(marker, x, '--', y, ', Indeterminate, should be: ', shouldBe, ',R = ', R)
+        if VERBOSE:
+            print('\nerrors = ', errors, '/', len(edges), '\n')
+
+
+    def findExogenous(self):
+        rvList = list(self.rvList)
+        rvList.sort()
+        accum = {}
+        for v in rvList:
+            accum[v] = 0.0
+        numVars = len(rvList)
+        for i in range(numVars):
+            x = rvList[i]
+            for j in range(i+1, numVars):
+                y = rvList[j]
+                if x == y:
+                    continue
+                R = direction.direction(self.data[x], self.data[y])
+
+                if R > 0:
+                    leastCausal = y
+                else:
+                    leastCausal = x
+                accum[leastCausal] += abs(R)
+        scores = [(accum[key], key) for key in accum.keys()]
+        scores.sort()
+        exos = []
+        for tup in scores:
+            var = tup[1]
+            if not exos:
+                exos.append(var)
+            else:
+                isExo = True
+                for exo in exos:
+                    pval = independence.test([self.data[var]], [self.data[exo]])
+                    print('ind ', var, '-', exo, ' = ', pval)
+                    if pval < .1:
+                        isExo = False
+                        break
+                        
+                if isExo:
+                    exos.append(var)
+                else:
+                    break
+                        
+        if VERBOSE:
+            print('\nExogenous = ', exos, '\n')
+            #print('scores = ', scores, accum)
 
     def intervene(self, targetRV, doList, controlFor = []):
         """ Implements Intverventions (Level2 of Ladder of Causality)

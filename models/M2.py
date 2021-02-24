@@ -26,8 +26,8 @@ varEquations = [
 			    #'B = logistic(1, 1)',
 			    #'A = .8 * B + normal(0, .5)',
 			    #'C = 1.5 * A + 2 * B + normal(0, .2)',
-                'B = choice(range(-bRange, bRange+1))',
-			    'A = 1 * B  + normal(0,3)',
-			    'C = 1.5 * A + 2 * B + normal(0,3)',
+                'B = logistic(3,5)',
+			    'A = 1 * B  + logistic(0,3)',
+			    'C = 1.5 * A + 2 * B + logistic(0,3)',
                 't = t + 1'
 		        ]

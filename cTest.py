@@ -15,6 +15,7 @@ exec(f.read(), globals())
 print('Testing: ', test, '--', testDescript)
 start = time.time()
 gnodes = []
+
 # 'model' is set when the text file is exec'ed
 for var in model:
     observed = True
@@ -39,12 +40,17 @@ g = cGraph.cGraph(gnodes, data)
 
 g.printGraph()
 
-deps = g.computeDependencies(3)
+g.findExogenous()
+
+g.testDirection()
+
+deps = g.computeDependencies(2)
 
 #print('deps = ', deps)
 g.printDependencies(deps)
 
-results = g.TestModel()
+
+results = g.TestModel(order = 2)
 conf = results[0]
 print('\nConfidence = ', round(conf * 100, 1), '%, testPerType = ', results[2], ', errsPerType = ', results[3])
 print('TestResults = ', results)

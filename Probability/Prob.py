@@ -500,7 +500,10 @@ class Sample:
             dep1 = abs((mean1 - mean2))
             std1 = prob1.stDev()
             std2 = prob2.stDev()
-            dep2 = abs((std1 - std2) / (std1 + std2))
+            if std1 + std2 > 0:
+                dep2 = abs((std1 - std2) / (std1 + std2))
+            else:
+                dep2 = 0.0
             if not self.isDiscrete(rv1):
                 sk1 = prob1.skew()
                 sk2 = prob2.skew()
@@ -508,6 +511,8 @@ class Sample:
                 ku2 = prob2.kurtosis()
                 dep3 = abs((sk1 - sk2))
                 dep4 = abs((ku1 - ku2))
+                dep3 = 0
+                dep4 = 0
                 #print('std1, std2, sk1, sk2) = ', std1, std2, sk1, sk2)
             else:
                 dep1 = prob1.compare(prob2)

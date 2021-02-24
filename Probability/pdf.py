@@ -18,6 +18,14 @@ class PDF:
         self.min = binList[0][1] # min of bin 0
         self.max = binList[self.binCount - 1][2] # max of last bin
 
+    def binValue(self, i):
+        bin = self.bins[i]
+        id, min, max, prob = bin
+        if self.isDiscrete:
+            value = min
+        else:
+            value = (min + max) / 2
+        return value
 
     def P(self, value):
         """Return the probability of a given value."""
@@ -41,25 +49,24 @@ class PDF:
             if self.isDiscrete:
                 value = min
             else:
-                value = (min + max) / 2
+                value = (min + max) / 2.0
+            value = self.binValue(i)
             cum += prob * value
+        return cum
 
-        exp = cum
-        return exp
-
-    def stDev(self):
+    def var(self):
         mean = self.E()
         cum = 0.0
         for i in range(self.binCount):
             bin = self.bins[i]
             id, min, max, prob = bin
-            if self.isDiscrete:
-                value = min
-            else:
-                value = (min + max) / 2
-            
+            value = self.binValue(i)
             cum += prob * (value - mean)**2
         var = cum
+        return var
+
+    def stDev(self):
+        var = self.var()
         std = sqrt(var)
         return std
 
@@ -72,14 +79,12 @@ class PDF:
         for i in range(self.binCount):
             bin = self.bins[i]
             id, min, max, prob = bin
-            if self.isDiscrete:
-                value = min
-            else:
-                value = (min + max) / 2.0
-            cum += prob * (value-mean) / std
-        return cum / self.N
+            value = self.binValue(i)
+            cum += prob * ((value-mean) / std)**3
+        return cum
 
     def kurtosis(self):
+        """ Return the excess kurtosis of the distribution"""
         mean = self.E()
         std = self.stDev()
         if std == 0:
@@ -88,12 +93,9 @@ class PDF:
         for i in range(self.binCount):
             bin = self.bins[i]
             id, min, max, prob = bin
-            if self.isDiscrete:
-                value = min
-            else:
-                value = (min + max) / 2
+            value = self.binValue(i)
             cum += prob * ((value-mean) / std)**4
-        return cum / self.N
+        return cum - 3
 
     def ToHistogram(self):
         """Convert the pdf to a numpy array of probabilities [P(bin1), ..., P(binN)]"""
