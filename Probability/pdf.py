@@ -27,9 +27,53 @@ class PDF:
             value = (min + max) / 2
         return value
 
-    def P(self, value):
-        """Return the probability of a given value."""
-        outProb = 0.0 
+    def minVal(self):
+        return self.min
+    
+    def maxVal(self):
+        return self.max
+
+    def getBinForVal(self, value):
+        if value < self.min:
+            return 0
+        elif value >= self.max:
+            return len(self.bins)-1
+        for i in range(self.binCount):
+            bin = self.bins[i]
+            indx, start, end, prob = bin
+            if value >= start and value < end:
+                return i
+        print('no bin found', value, self.min, self.max)
+
+    def P(self, valueSpec):
+        """ Return the probability of a given value or range of values.
+            valueSpec can be:
+            number -- The probability of attaining the given value
+                        Note: For real valued continuous variables, the probability
+                        of attaining a given value is essentially zero.  In this case,
+                        the probability of attaining a value within the discretized bin
+                        associated with value is returned.  This is useful for comparison
+                        purposes, but the returned probability is dependent on the discretization
+                        density.
+            (low, high) -- The probability of attaining a value in the range (low <= value < high)
+                        high = None means infinity
+                        low = None means negative infinity
+        """
+        outProb = 0.0
+        if type(valueSpec) == type((0,)):
+            # it's a range tuple
+            assert len(valueSpec) == 2, 'pdf.P: valueSpec must be a single number or 2-tuple = ' + str(valueSpec)
+            low, high = valueSpec
+            if low is None:
+                low = self.min - 1
+            if low > self.max:
+                return 0.0
+            if high is None:
+                high = self.max + 1
+            if high <= self.min:
+                return 0.0
+            return self.Prange(low, high)
+        value = valueSpec
         if value < self.min or value >= self.max:
             return outProb  # Outside the range.  Zero probability.
         for i in range(self.binCount):
@@ -39,7 +83,32 @@ class PDF:
                 outProb = prob
                 break
         return outProb
-        
+
+    def Prange(self, minVal, maxVal):
+        """ Return the probability of x between 2 values
+            i.e. P(minVal <= X < maxVal)
+        """
+        if minVal < self.min:
+            minVal = self.min
+        if maxVal > self.max:
+            maxVal = self.max
+        firstBin = self.getBinForVal(minVal)
+        lastBin = self.getBinForVal(maxVal)
+        cum = 0.0
+        for i in range(firstBin, lastBin + 1):
+            bin = self.bins[i]                
+            indx, bmin, bmax, prob = bin
+            if i == firstBin and i == lastBin:
+                adjProb = (maxVal - minVal) / (bmax - bmin) * prob
+            elif i == firstBin:
+                adjProb = (bmax - minVal) / (bmax - bmin) * prob
+            elif i == lastBin:
+                adjProb = (maxVal - bmin) / (bmax - bmin) * prob
+            else:
+                adjProb = prob
+            cum += adjProb
+        return cum
+
     def E(self):
         """Return the expected value (e.g. mean) of the disribution."""
         cum = 0
@@ -54,6 +123,8 @@ class PDF:
             cum += prob * value
         return cum
 
+    mean = E
+    
     def var(self):
         mean = self.E()
         cum = 0.0
@@ -95,11 +166,21 @@ class PDF:
             id, min, max, prob = bin
             value = self.binValue(i)
             cum += prob * ((value-mean) / std)**4
+        
         return cum - 3
 
     def ToHistogram(self):
         """Convert the pdf to a numpy array of probabilities [P(bin1), ..., P(binN)]"""
         return np.array([bin[3] for bin in self.bins])
+
+    def ToHistTuple(self):
+        """Convert the pdf to a list of tuples of binVal, and P(bin) --  [(binVal1, P(bin1)), ..., (binValN, P(binN))]"""
+        outTups = []
+        for i in range(len(self.bins)):
+            bin = self.bins[i]
+            binProb = bin[3]
+            outTups.append((self.binValue(i), binProb))
+        return outTups
 
     def SetHistogram(self, newHist):
         assert len(newHist) == len(self.bins), "PDF.SetHistogram: Cannot set histogram with different lenght than current distribution.  (new, original) = " + str((len(newHist), len(self.bins)))

@@ -1,13 +1,13 @@
 # Module to compute field aggregates for a dataset
 import numpy as np
 import math
+from Probability import probCharts
 from Probability.pdf import PDF
 
 VERBOSE = False
 
 class Sample:
-    global PRECISION
-    def __init__(self, ds, density = 1.0, discSpecs = None, precision=2):
+    def __init__(self, ds, density = 1.0, power=1, discSpecs = None):
         """ Create a probability sample object.  Sample provides a mechanism for analyzing
             the probability space of a multivariate dataset.
             It can handle discrete as well as continuous variables.  Continuous probabilities
@@ -24,7 +24,7 @@ class Sample:
             The discSpecs parameter is used to make recursive calls to the module while
             maintaining the discretization information, and should not be provided by the user.
         """
-        self.precision = precision
+        self.power = power
         self.ds = ds
         self.density = density
         self.fieldList = list(ds.keys())
@@ -128,6 +128,10 @@ class Sample:
             data[fieldName] = fieldVals
         return data
 
+    def toJointProbability(pdfs):
+        """
+            Convert a series of PDFs, and convert them into a new prob object (multivariate probability)
+        """
     def getMidpoints(self, field):
         indx = self.fieldIndex[field]
         dSpec = self.discSpecs[indx]
@@ -149,24 +153,49 @@ class Sample:
         return range(bucketCount)
 
     def filter(self, filtSpecs):
-        """ Filter the data based on a set of filterspecs: [(varName, value), ...]"""
+        """ Filter the data based on a set of filterspecs: [filtSpec, ...]
+            filtSpec := (varName, value) or (varName, lowValue, highValue)
+        """
         filtSpecs2 = []
         # Transform filtSpecs from (varName, value) to (varIndex, discretizedValue)
         for filt in filtSpecs:
-            field, value = filt
-            indx = self.fieldIndex[field]
-            dSpec = self.discSpecs[indx]
-            edges = list(dSpec[3])
-            dValue = np.digitize(value, edges[:-1]) - 1
-            filtSpecs2.append((indx, dValue))
+            if len(filt) == 2:
+                field, value = filt
+                indx = self.fieldIndex[field]
+                dSpec = self.discSpecs[indx]
+                edges = list(dSpec[3])
+                dValue = np.digitize(value, edges[:-1]) - 1
+                filtSpecs2.append((indx, dValue))
+            else:
+                field, low, high = filt
+                indx = self.fieldIndex[field]
+                dSpec = self.discSpecs[indx]
+                edges = list(dSpec[3])
+                varMin = dSpec[1]
+                varMax = dSpec[2]
+                if low is None:
+                    low = varMin
+                if high is None:
+                    high = varMax
+                dValueL = np.digitize(low, edges[:-1]) - 1
+                dValueH = np.digitize(high, edges[:-1]) - 1
+                filtSpecs2.append((indx, dValueL, dValueH))
+
         remRecs = []
         for i in range(self.N):
             include = True
             for filt in filtSpecs2:
-                fieldInd, dValue = filt
-                if self.discretized[fieldInd, i] != dValue:
-                    include = False
-                    break
+                if len(filt) == 2:
+                    fieldInd, dValue = filt
+                    if self.discretized[fieldInd, i] != dValue:
+                        include = False
+                        break
+                else:
+                    fieldInd, dValueL, dValueH = filt
+                    datBin = self.discretized[fieldInd, i]
+                    if datBin < dValueL or datBin > dValueH:
+                        include = False
+                        break
             if not include:
                 remRecs.append(i)
         # Remove all the non included rows
@@ -183,17 +212,62 @@ class Sample:
         val = (min + max) / 2
         return val
 
-    def prob(self, rvName, value, givenSpec=None):
-        """Return the probability that a variable is equal to a particular value
-           given a set of conditions.  Returns a probability value 0 <= v <= 1.
-           See distr (below) for a definition of the givenSpec.
+    def prob(self, rvSpec, givenSpec=None):
+        """ Return the probability of a variable or (set of variables)
+            attaining a given value (or range of values) given a set
+            of conditionalities on other variables.
+            rvSpec may be a single rv specification or list of rv specifications:
+            If it is a list of specifications, then the joint probability of the
+            specifications is returned.
+            An rv specification may be a 2-tuple (varName, value) for the probability
+            of attaining a single value, or may
+            be a 3-tuple: (varName, minValue, maxValue) indicating a range.
+            minValue or maxValue may be None.  A minValue of None implies 
+            -infinity.  A maxValue of None implies infinity.
+            givenSpec has the same format as rvSpec with equivalent meanings
+            for the givens.  A given specification supports one additional flavor which
+            is a single variable name.  This means that that variable should be
+            "conditionalized" on.
+            The three flavors (varName, 2-tuple, 3-tuple)
+            may be mixed within a givenSpec.
+
+            Examples:
+            - prob(('A', 1)) -- The probability that variable A takes on the value 1.
+            - prob([('A', 1), ('B', 2)]) -- The probability that A is 1 and B is 2.
+            - prob(('A', .1, .5)) -- The probability that A is in the range [.1, .5).
+            - prob(('A', .1, .5), [('B', 0, 1), ('C', -1, None)] -- The probability that
+                    A is on interval [.1, .5) given that B is on interval [0,1) and
+                    C is on interval [-1, infinity).
         """
-        d = self.distr(rvName, givenSpec)
-        return d.P(value)
+        if givenSpec is None:
+            givenSpec = []
+        if type(givenSpec) != type([]):
+            givenSpec = [givenSpec]
+        if type(rvSpec) == type([]):
+            # Joint probability
+            rvSpecU, rvSpecB = self.separateSpecs(rvSpec)
+            assert len(rvSpecU) == 0, 'prob.P: All target specifications must be bound (i.e. specified as tuples).  For unbound returns, use distr.)'
+            return self.jointProb(rvSpec, givenSpec)
+
+            #Ds = []
+            #for spec in rvSpec:
+            #    var = spec[0]
+            #    d = self.distr(var, givenSpec)
+            #    Ds.append(d)
+            #jp = self.toJointDistribution(Ds)
+            #return jp.jointProb(rvSpec)
+        else:
+            rvName = rvSpec[0]
+            if len(rvSpec) == 2:
+                valSpec = rvSpec[1]
+            else:
+                valSpec = rvSpec[1:]
+            d = self.distr(rvName, givenSpec)
+            return d.P(valSpec)
 
     P = prob
 
-    def distr(self, rvName, givenSpecs=None, precision=None):
+    def distr(self, rvName, givenSpecs=None, power=None):
         """Return a probability distribution as a PDF (see pdf.py) for the random variable
            indicated by rvName.
            If givenSpecs is provided, then will return the conditional distribution,
@@ -211,15 +285,16 @@ class Sample:
             If there is only one condition, it can be passed as s single tuple
             Examples:
             - distr('Y') -- The marginal probability of Y
-            - distr('Y', [('X', 1)]) -- The probability of Y given X=1
+            - distr('Y', [('X', 1)]) -- The probability of Y given X=1.
+            - distr('Y', [('X', 1, 2)]) -- The probability of Y given 1 <= X < 2.
             - distr('Y', ('X', 1)) -- The probability of Y given X=1 (same as above)
             - distr('Y', [('X1', 1), ('X2', 0)]) - The probability of Y given X1 = 1, and X2 = 0
             - distr('Y', [('X', 1), 'Z']) -- The probability of Y given X = 1, conditionalized on Z
         """
         if VERBOSE:
             print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
-        if precision is None:
-            precision = self.precision
+        if power is None:
+            power = self.power
         isDiscrete = self.isDiscrete(rvName)
         indx = self.fieldIndex[rvName]
         dSpec = self.discSpecs[indx]
@@ -256,13 +331,13 @@ class Sample:
             condSpecs = [] # Conditionalization specifications
             for givenSpec in givenSpecs:
                 if type(givenSpec) == type((1,)):
-                    # Is a conditional spec (varName, value)
-                    # We filter the distribution based on the value
-                    condVar, val = givenSpec
-                    filtSpecs.append(givenSpec)
+                    # Is a conditional spec  of the form (varName, value)
+                    # or (varName, lowValue, highValue)
+                    # We filter the distribution based on the spec
+                     filtSpecs.append(givenSpec)
                 else:
                     # Its a variable to conditionalize on.
-                    condSpecs.append(givenSpec[0])
+                    condSpecs.append(givenSpec)
             if not condSpecs:
                 # Nothing to conditionalize on.  We can just filter the distribution
                 # and return the filtered dist
@@ -278,7 +353,7 @@ class Sample:
                 conditionalizeOn = []
                 for given in condSpecs:
                     conditionalizeOn.append(given)
-                condfiltSpecs = self.getCondSpecs(conditionalizeOn, precision)
+                condfiltSpecs = self.getCondSpecs(conditionalizeOn, power)
                 #print('filtSpecs = ', filtSpecs)
                 #countRatio = float(self.N) / filtSample.N
                 #print('countRatio = ', countRatio)
@@ -316,17 +391,17 @@ class Sample:
 
     PD = distr
 
-    def getCondSpecs(self, condVars, precision=2):
+    def getCondSpecs(self, condVars, power=2):
         """ Produce a set of conditional specifications for stochastic
             conditionalization, given
-            a set of variables to conditionalize on, and a desired precision level.
-            Precision determines how many points to use to conditionalize on.
+            a set of variables to conditionalize on, and a desired power level.
+            Power determines how many points to use to conditionalize on.
             Zero indicates conditionalize on the mean alone. 1 uses the mean
             and two other points (one on either side of the mean).
             2 Uses the mean plus 4 other points (2 on each side of the mean).
-            Precision values (p) less than 100 will test p * 2 + 1 values for each
-            variable.
-            Precision value > 100 indicates that all values will be tested,
+            Power values (p) less than 100 will test p * 2 + 1 values for each
+            variable.range
+            power value > 100 indicates that all values will be tested,
             which can be extremely processor intensive.
             Conditional specifications provide a list of lists of tuple:
             [[(varName1, value1_1), (varName2, value2_1), ... (varNameK, valueK_1)],
@@ -358,14 +433,14 @@ class Sample:
             return testVals
         levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
         maxLevel = 3 # Largest standard deviation to sample
-        if precision <= 8:
+        if power <= 8:
             levelSpecs = levelSpecs0
-        elif precision < 100:
-            levelSpecs = range(1/precision, maxLevel + 1/precision, 1/precision)
+        elif power < 100:
+            levelSpecs = range(1/power, maxLevel + 1/power, 1/power)
         else:
             levelSpecs = None
         if levelSpecs:
-            testPoints = [0] + levelSpecs[:precision]
+            testPoints = [0] + levelSpecs[:power]
         else:
             # TestPoints None means test all values
             testPoints = None
@@ -381,24 +456,24 @@ class Sample:
             # We're not on the last var, so recurse and build up the total set
             accum = []
             vals = getTestVals(self, rvName)
-            childVals = self.getCondSpecs(condVars[1:], precision) # Recurse to get the child values
+            childVals = self.getCondSpecs(condVars[1:], power) # Recurse to get the child values
             for val in vals:
                 accum += [[(rvName, val)] + childVal for childVal in childVals]
             return accum
 
-    def dependence_new(self, rv1, rv2, givens=[], precision = None):
+    def dependence_new(self, rv1, rv2, givens=[], power = None):
         """ givens is [given1, given2, ... , givenN]
         """
-        if precision is None:
-            precision = self.precision
+        if power is None:
+            power = self.power
+        
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
-        # Depending on precision, we test more combinations.  If level >= 100, we test all combos
+        # Depending on power, we test more combinations.  If level >= 100, we test all combos
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
-
-        condFiltSpecs = self.getCondSpecs(givens + [rv2], precision)
+        condFiltSpecs = self.getCondSpecs(givens + [rv2], power)
         prevGivensSpec = None
         prevProb1 = None
         testVals = []
@@ -416,7 +491,7 @@ class Sample:
                     prob1 = self.distr(rv1, givensSpec)
                 else:
                     prob1 = self.distr(rv1)
-                testVals0 = self.getCondSpecs([rv1], precision)
+                testVals0 = self.getCondSpecs([rv1], power)
                 testVals = [tv[1] for tv in testVals0]
             else:
                 # Otherwise use the previously computed prob1
@@ -458,18 +533,35 @@ class Sample:
         print('Cond distr too small: ', rv1, rv2, givens)
         return 0.0
 
-    def dependence(self, rv1, rv2, givens=[], precision=None):
+    def separateSpecs(self, specs):
+        """ Separate bound and unbound variable specs,
+            and return (unboundSpecs, boundSpecs).
+        """
+        uSpecs = []
+        bSpecs = []
+        for spec in specs:
+            if type(spec) == type((0,)):
+                # It is a bound spec
+                bSpecs.append(spec)
+            else:
+                # Unbound
+                bSpecs.append(spec)
+        return uSpecs, bSpecs
+
+    def dependence(self, rv1, rv2, givens=[], power=None):
         """ givens is [given1, given2, ... , givenN]
         """
-        if precision is None:
-            precision = self.precision
+        if power is None:
+            power = self.power
+        # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
+        givensU, givensB = self.separateSpecs(givens)
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
         # Depending on level, we test more combinations.  If level >= 100, we test all combos
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
-        condFiltSpecs = self.getCondSpecs(givens + [rv2], precision)
+        condFiltSpecs = self.getCondSpecs(givensU + [rv2], power)
         prevGivensSpec = None
         prevProb1 = None
         numTests = 0
@@ -483,13 +575,13 @@ class Sample:
                 # Only recompute prob 1 when givensValues change
                 #print('givensSpec = ', givensSpec)
                 if givensSpec:
-                    prob1 = self.distr(rv1, givensSpec)
+                    prob1 = self.distr(rv1, givensSpec + givensB)
                 else:
                     prob1 = self.distr(rv1)
             else:
                 # Otherwise use the previously computed prob1
                 prob1 = prevProb1
-            prob2 = self.distr(rv1, spec)
+            prob2 = self.distr(rv1, spec + givensB)
 
             if prob2.N < 5:
                 continue
@@ -564,23 +656,28 @@ class Sample:
             condSpecList.append(condSpecs)
         return condSpecList
 
-    def jointProb(self, varSpecs):
+    def jointProb(self, varSpecs, givenSpecs=None):
         """ Return the joint probability given a set of variables and their
             values.  varSpecs is of the form (varName, varVal).  We want
             to find the probability of all of the named variables having
             the designated value.
+            Join Probability is calculated as e.g.:
+            - P(A, B, C) = P(A | B,C) * P(B | C) * P(C)
         """
+        if givenSpecs is None:
+            givenSpecs = []
         accum = []
         nSpecs = len(varSpecs)
         for i in range(nSpecs):
-            rv, val = varSpecs[i]
+            spec = varSpecs[i]
             if i == nSpecs - 1:
-                accum.append(self.prob(rv, val))
+                accum.append(self.prob(spec, givenSpecs))
             else:
                 nextSpecs = varSpecs[i+1:]
-                accum.append(self.prob(rv, val, nextSpecs))
+                accum.append(self.prob(spec, nextSpecs + givenSpecs))
 
-       # Return the product of the accumulated probabilities
+        # Return the product of the accumulated probabilities
+        #print('accum = ', accum)
         allProbs = np.array(accum)
         jointProb = float(np.prod(allProbs))
         #print('jointProb: varSpecs = ', varSpecs, ', prob = ', jointProb)
@@ -618,3 +715,62 @@ class Sample:
         dSpec = self.discSpecs[indx]
         isDisc = dSpec[5]
         return isDisc
+
+    def corrCoef(self, rv1, rv2):
+        """Pearson Correlation Coefficient (rho)
+        """
+        indx1 = self.fieldIndex[rv1]
+        indx2 = self.fieldIndex[rv2]
+        dat1 = self.aData[indx1,:]
+        dat2 = self.aData[indx2,:]
+        mean1 = dat1.mean()
+        mean2 = dat2.mean()
+        num1 = 0.0
+        denom1 = 0.0
+        denom2 = 0.0
+        for i in range(self.N):
+            v1 = dat1[i]
+            v2 = dat2[i]
+            diff1 = v1 - mean1
+            diff2 = v2 - mean2
+            num1 += diff1 * diff2
+            denom1 += diff1**2
+            denom2 += diff2**2
+        rho = num1 / (denom1**.5 * denom2**.5)
+        return rho
+
+    def plot(self):
+        inf = 10**30
+        plotDict = {}
+        minX = inf
+        maxX = -inf
+        numPts = 1000
+        pdfs = []
+        for v in self.fieldList:
+            d = self.distr(v)
+            minval = d.minVal()
+            maxval = d.maxVal()
+            if maxval > maxX:
+                maxX = maxval
+            if minval < minX:
+                minX = minval
+            pdfs.append(d)
+        xvals = []
+        for i in range(numPts):
+            rangex = maxX - minX
+            incrx = rangex / numPts
+            xvals.append(minX + i * incrx)
+        for i in range(len(self.fieldList)):
+            yvals = []
+            var = self.fieldList[i]
+            pdf = pdfs[i]
+            for j in range(numPts):
+                xval = xvals[j]
+                if j == numPts - 1:
+                    P = pdf.P((xval, maxX))
+                else:
+                    P = pdf.P((xval, xvals[j+1]))
+                yvals.append(P)
+            plotDict[var] = yvals
+        plotDict['_x_'] = xvals
+        probCharts.plot(plotDict)
