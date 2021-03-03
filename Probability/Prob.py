@@ -4,7 +4,7 @@ import math
 from Probability import probCharts
 from Probability.pdf import PDF
 
-VERBOSE = False
+DEBUG = False
 
 class Sample:
     def __init__(self, ds, density = 1.0, power=1, discSpecs = None):
@@ -39,11 +39,11 @@ class Sample:
             npDat.append(ds[field])
         self.aData = np.array(npDat)
         self.N = self.aData.shape[1]
-        #print('N = ', self.N)
+        self.probCache = {} # Probability cache
+        self.distrCache = {} # Distribution cache
         self.fieldAggs = self.getAgg(ds)
         if discSpecs:
             self.discSpecs = self.fixupDiscSpecs(discSpecs)
-            #print('self.aData = ', self.aData)
             self.discretized = self.discretize()
         else:
             self.discSpecs = self.calcDiscSpecs()
@@ -51,7 +51,6 @@ class Sample:
 
     def getAgg(self, ds):
         fieldList = list(ds.keys())
-        #print('shape = ', self.aData.shape)
         numObs = self.aData.shape[1]  # Number of observations
         if numObs > 0:
             mins = self.aData.min(1)
@@ -81,12 +80,10 @@ class Sample:
                 nBins = maxV - minV + 1
                 binStarts = [v for v in range(minV, maxV + 1)]
                 vals, counts = np.unique(self.aData[i], return_counts = True)
-                #print('vals, counts = ', vals, counts)
                 hist = np.zeros((len(binStarts),))
                 for j in range(len(vals)):
                     val = int(vals[j])
                     count = counts[j]
-                    #print('va, count, hist = ', val, count, hist)
                     hist[j] = count
                 edges = [v for v in range(minV, maxV + 2)]
             else:
@@ -107,7 +104,6 @@ class Sample:
             newHist, newEdges = np.histogram(self.aData[i], bins, (min, max))
             #assert edges == newEdges, 'Bad Edges'
             outSpecs.append((bins, min, max, edges, newHist, isDiscrete))
-        #print('fixedDiscSpecs = ', outSpecs)
         return outSpecs
 
     def discretize(self):
@@ -123,7 +119,6 @@ class Sample:
         data = {}
         for f in range(len(self.fieldList)):
             fieldName = self.fieldList[f]
-            #print('discretized = ', discretized.shape, discretized)
             fieldVals = list(discretized[f, :])
             data[fieldName] = fieldVals
         return data
@@ -187,6 +182,8 @@ class Sample:
             for filt in filtSpecs2:
                 if len(filt) == 2:
                     fieldInd, dValue = filt
+                    if type(dValue) == type((0,)):
+                        dValue = dValue[0]
                     if self.discretized[fieldInd, i] != dValue:
                         include = False
                         break
@@ -211,6 +208,18 @@ class Sample:
         max = dSpec[2]
         val = (min + max) / 2
         return val
+
+    def makeHashkey(self, targetSpec, givenSpec):
+        if type(targetSpec) == type([]):
+            targetSpec = tuple(targetSpec)
+        if type(givenSpec) == type([]):
+            givenSpec = tuple(givenSpec)
+        hashKey = (targetSpec, givenSpec)
+        return hashKey
+
+    def E(self, targetSpec, givensSpec):
+        d = self.distr(targetSpec, givensSpec)
+        return d.E()
 
     def prob(self, rvSpec, givenSpec=None):
         """ Return the probability of a variable or (set of variables)
@@ -243,19 +252,16 @@ class Sample:
             givenSpec = []
         if type(givenSpec) != type([]):
             givenSpec = [givenSpec]
+        cacheKey = self.makeHashkey(rvSpec, givenSpec)
+        if cacheKey in self.probCache.keys():
+            return self.probCache[cacheKey]
         if type(rvSpec) == type([]):
             # Joint probability
             rvSpecU, rvSpecB = self.separateSpecs(rvSpec)
             assert len(rvSpecU) == 0, 'prob.P: All target specifications must be bound (i.e. specified as tuples).  For unbound returns, use distr.)'
-            return self.jointProb(rvSpec, givenSpec)
-
-            #Ds = []
-            #for spec in rvSpec:
-            #    var = spec[0]
-            #    d = self.distr(var, givenSpec)
-            #    Ds.append(d)
-            #jp = self.toJointDistribution(Ds)
-            #return jp.jointProb(rvSpec)
+            result = self.jointProb(rvSpec, givenSpec)
+            self.probCache[cacheKey] = result
+            return result
         else:
             rvName = rvSpec[0]
             if len(rvSpec) == 2:
@@ -263,14 +269,16 @@ class Sample:
             else:
                 valSpec = rvSpec[1:]
             d = self.distr(rvName, givenSpec)
-            return d.P(valSpec)
+            result = d.P(valSpec)
+            self.probCache[cacheKey] = result
+            return result
 
     P = prob
 
     def distr(self, rvName, givenSpecs=None, power=None):
         """Return a probability distribution as a PDF (see pdf.py) for the random variable
            indicated by rvName.
-           If givenSpecs is provided, then will return the conditional distribution,
+           If givenSpec is provided, then will return the conditional distribution,
            otherwise will return the unconditional (i.e. marginal) distribution.
            This satisfies the following types of probability queries:
             - P(Y)
@@ -291,16 +299,23 @@ class Sample:
             - distr('Y', [('X1', 1), ('X2', 0)]) - The probability of Y given X1 = 1, and X2 = 0
             - distr('Y', [('X', 1), 'Z']) -- The probability of Y given X = 1, conditionalized on Z
         """
-        if VERBOSE:
+        if DEBUG:
             print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
         if power is None:
             power = self.power
+        if givenSpecs is None:
+            givenSpecs = []
+        if type(givenSpecs) != type([]):
+            givenSpecs = [givenSpecs]
+        cacheKey = self.makeHashkey(rvName, givenSpecs)
+        if cacheKey in self.distrCache.keys():
+             return self.distrCache[cacheKey]
         isDiscrete = self.isDiscrete(rvName)
         indx = self.fieldIndex[rvName]
         dSpec = self.discSpecs[indx]
         bins = dSpec[0]
 
-        if givenSpecs is None:
+        if not givenSpecs:
             # Marginal (unconditional) Probability
             bins = dSpec[0]
             hist = list(dSpec[4])
@@ -322,22 +337,11 @@ class Sample:
                 end = edges[i+1]
                 pdfSpec.append((i, start, end, outHist[i]))
             outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete)
+            self.distrCache[cacheKey] = outPDF
             return outPDF
         else:
             # Conditional Probability
-            if type(givenSpecs) != type([]):
-                givenSpecs = [givenSpecs]
-            filtSpecs = [] # Filter specifications
-            condSpecs = [] # Conditionalization specifications
-            for givenSpec in givenSpecs:
-                if type(givenSpec) == type((1,)):
-                    # Is a conditional spec  of the form (varName, value)
-                    # or (varName, lowValue, highValue)
-                    # We filter the distribution based on the spec
-                     filtSpecs.append(givenSpec)
-                else:
-                    # Its a variable to conditionalize on.
-                    condSpecs.append(givenSpec)
+            condSpecs, filtSpecs = self.separateSpecs(givenSpecs)
             if not condSpecs:
                 # Nothing to conditionalize on.  We can just filter the distribution
                 # and return the filtered dist
@@ -354,13 +358,10 @@ class Sample:
                 for given in condSpecs:
                     conditionalizeOn.append(given)
                 condfiltSpecs = self.getCondSpecs(conditionalizeOn, power)
-                #print('filtSpecs = ', filtSpecs)
                 #countRatio = float(self.N) / filtSample.N
-                #print('countRatio = ', countRatio)
                 allProbs = 0.0 # The fraction of the probability space that has been tested.
                 for cf in condfiltSpecs:
                     totalF = filtSpecs + cf
-                    #print('totalF = ', totalF)
                     probZ = self.jointProb(cf) # P(Z=z)
                     if probZ == 0:
                          # Zero probability -- don't bother accumulating
@@ -371,11 +372,9 @@ class Sample:
                         # Zero probability.  No need to accumulate
                         continue
                     probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
-                    #print('f = ', totalF, 'probs = ', probs)
                     accum += probs
                     allProbs += probZ
                 accum = accum / allProbs
-                #print('accum = ', accum, sum(accum))
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
                 # original bin structure. 
@@ -387,6 +386,7 @@ class Sample:
                     newBin = pdfBin[:-1] + (newprob,)
                     outSpecs.append(newBin)
                 outPDF = PDF(self.N, outSpecs, isDiscrete = isDiscrete)
+            self.distrCache[cacheKey] = outPDF
             return outPDF
 
     PD = distr
@@ -412,6 +412,7 @@ class Sample:
             of combinations = K**(2 * P + 1) for values of P < 100.
             """
         def getTestVals(self, rv):
+            delta = .2
             isDiscrete = self.isDiscrete(rvName)
             if isDiscrete or testPoints is None:
                 # If is Discrete, return all values
@@ -425,11 +426,11 @@ class Sample:
                 for tp in testPoints:
                     if tp == 0:
                         # For 0, just use the mean
-                        testVals.append(mean)
+                        testVals.append((mean - delta * std, mean + delta * std))
                     else:
                         # For nonzero, test points mean + tp and mean - tp
-                        testVals.append(mean - tp * std)
-                        testVals.append(mean + tp * std)
+                        testVals.append((mean - tp * std - delta * std, mean - tp * std + delta * std))
+                        testVals.append((mean + tp * std - delta * std, mean + tp * std + delta * std))
             return testVals
         levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
         maxLevel = 3 # Largest standard deviation to sample
@@ -451,14 +452,20 @@ class Sample:
         if nVars == 1:
             # Only one var to do.  Find the values.
             vals = getTestVals(self, rvName)
-            return [[(rvName, val)] for val in vals]
+            if self.isDiscrete(rvName):
+                return [[(rvName, val)] for val in vals]
+            else:
+                return [[((rvName,) + val)] for val in vals]
         else:
             # We're not on the last var, so recurse and build up the total set
             accum = []
             vals = getTestVals(self, rvName)
             childVals = self.getCondSpecs(condVars[1:], power) # Recurse to get the child values
             for val in vals:
-                accum += [[(rvName, val)] + childVal for childVal in childVals]
+                if self.isDiscrete(rvName):
+                    accum += [[(rvName, val)] + childVal for childVal in childVals]
+                else:
+                    accum += [[(rvName,) + val] + childVal for childVal in childVals]
             return accum
 
     def dependence_new(self, rv1, rv2, givens=[], power = None):
@@ -478,15 +485,12 @@ class Sample:
         prevProb1 = None
         testVals = []
         numTests = 0
-        #print('condFiltSpecs = ', condFiltSpecs)
         for spec in condFiltSpecs:
-            #print('spec = ', spec)
             # Compare P(Y | Z) with P(Y | X,Z)
             # givensSpec is conditional on givens without rv2
             givensSpec = spec[:-1]
             if givensSpec != prevGivensSpec:
                 # Only recompute prob 1 when givensValues change
-                #print('givensSpec = ', givensSpec)
                 if givensSpec:
                     prob1 = self.distr(rv1, givensSpec)
                 else:
@@ -516,7 +520,6 @@ class Sample:
             else:
                 err = prob1.compare(prob2)
                 deps.append(err)
-            #print('mean, std, skew = ', dep1, dep2, dep3)
             dep = max(deps)
             dep = sum(deps) / len(deps)
             # We accumulate any measured dependency multiplied by the probability of the conditional
@@ -525,7 +528,8 @@ class Sample:
             accum += dep * condProb
             accumProb += condProb # The total probability space assessed
             numTests += 1
-            #print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
+            if DEBUG:
+                print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
             dependence = accum / accumProb 
@@ -545,14 +549,18 @@ class Sample:
                 bSpecs.append(spec)
             else:
                 # Unbound
-                bSpecs.append(spec)
+                uSpecs.append(spec)
         return uSpecs, bSpecs
 
-    def dependence(self, rv1, rv2, givens=[], power=None):
+    def dependence(self, rv1, rv2, givens=None, power=None):
         """ givens is [given1, given2, ... , givenN]
         """
         if power is None:
             power = self.power
+        if givens is None:
+            givens = []
+        if type(givens) != type([]):
+            givens = [givens]
         # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
         givensU, givensB = self.separateSpecs(givens)
         accum = 0.0
@@ -565,24 +573,20 @@ class Sample:
         prevGivensSpec = None
         prevProb1 = None
         numTests = 0
-        #print('condFiltSpecs = ', condFiltSpecs)
         for spec in condFiltSpecs:
-            #print('spec = ', spec)
             # Compare P(Y | Z) with P(Y | X,Z)
             # givensSpec is conditional on givens without rv2
             givensSpec = spec[:-1]
             if givensSpec != prevGivensSpec:
                 # Only recompute prob 1 when givensValues change
-                #print('givensSpec = ', givensSpec)
                 if givensSpec:
                     prob1 = self.distr(rv1, givensSpec + givensB)
                 else:
-                    prob1 = self.distr(rv1)
+                    prob1 = self.distr(rv1, givensB)
             else:
                 # Otherwise use the previously computed prob1
                 prob1 = prevProb1
             prob2 = self.distr(rv1, spec + givensB)
-
             if prob2.N < 5:
                 continue
             prevGivensSpec = givensSpec
@@ -594,6 +598,7 @@ class Sample:
             std2 = prob2.stDev()
             if std1 + std2 > 0:
                 dep2 = abs((std1 - std2) / (std1 + std2))
+                dep2 = abs(std1 - std2)
             else:
                 dep2 = 0.0
             if not self.isDiscrete(rv1):
@@ -605,25 +610,25 @@ class Sample:
                 dep4 = abs((ku1 - ku2))
                 dep3 = 0
                 dep4 = 0
-                #print('std1, std2, sk1, sk2) = ', std1, std2, sk1, sk2)
             else:
                 dep1 = prob1.compare(prob2)
                 dep2 = dep3 = dep4 = 0.0
-            #print('mean, std, skew = ', dep1, dep2, dep3)
             dep = max([dep1, dep2, dep3, dep4])
             # We accumulate any measured dependency multiplied by the probability of the conditional
             # clause.  This way, we weight the dependency by the frequency of the event.
-            condProb = self.jointProb(spec)
+            if DEBUG:
+                print('spec = ', spec, ', givensB = ', givensB, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
+            condProb = self.jointProb(spec + givensB)
             accum += dep * condProb
             accumProb += condProb # The total probability space assessed
             numTests += 1
-            #print('spec = ', spec, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
             dependence = accum / accumProb
             return dependence
-        print('Cond distr too small: ', rv1, rv2, givens)
-        return 0.0
+        else:
+            print('Cond distr too small.  Accuracy may be impaired: ', rv1, rv2, givens)
+            return 0.0
 
     def jointValues(self, rvList):
         """ Return a list of the joint distribution values for a set of variables.
@@ -632,7 +637,6 @@ class Sample:
         nVars = len(rvList)
         rvName = rvList[0]
         vals = self.getMidpoints(rvName)
-        #print('jointVals: vals = ', vals)
         if nVars == 1:
             return ([(val,) for val in vals])
         else:
@@ -645,7 +649,6 @@ class Sample:
     def jointCondSpecs(self, rvList):
         condSpecList = []
         jointVals = self.jointValues(rvList)
-        #print('jointVals  =', jointVals)
         for item in jointVals:
             condSpecs = []
             for i in range(len(rvList)):
@@ -677,10 +680,8 @@ class Sample:
                 accum.append(self.prob(spec, nextSpecs + givenSpecs))
 
         # Return the product of the accumulated probabilities
-        #print('accum = ', accum)
         allProbs = np.array(accum)
         jointProb = float(np.prod(allProbs))
-        #print('jointProb: varSpecs = ', varSpecs, ', prob = ', jointProb)
         return jointProb
 
     def pdfToProbArray(self, pdf):

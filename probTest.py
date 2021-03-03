@@ -1,12 +1,21 @@
+""" This is the main test for prob.py.  It uses the data generator: models/probTestDat.py.
+    In order to run, you must first generate the test data using
+    python3 synth/synthDataGen.py models/probTestDat.py <numRecords>.  We typically
+    test with 100,000 records, so that is the recommended value for numRecords.
+"""
 from Probability.Prob import Sample
 from synth import getData
 import sys
+import time
 
 def run(filename):
     r = getData.DataReader(filename)
     dat = r.read()
-    samp = Sample(dat, density=1)
-
+    samp = Sample(dat, density=1, power=1)
+    start = time.time()
+    print()
+    print ('Testing probability module.  Note: values < .15 are considered ~ 0.')
+    print()
     print('Testing discrete deterministic probabilities (2-dice -- ala Craps)')
     print('stats(A) =  ', samp.fieldStats('A'))
     print('stats(C) = ', samp.fieldStats('C'))
@@ -64,13 +73,48 @@ def run(filename):
     print('A _||_ C = ', samp.dependence('A', 'C'), ' Exp: >> 0')
     print('N _||_ N2 = ', samp.dependence('N', 'N2'), ' Exp: >> 0')
     print('N _||_ C = ', samp.dependence('N', 'C'), ' Exp: ~ 0')
-    print('A _||_ B | C = 7) = ', samp.dependence('A', 'B', [('C', 7)]), ' Exp: >> 0')
-    print('A _||_ B | C >= 8) = ', samp.dependence('A', 'B', [('C', 8, None)]), ' Exp: >> 0')
-    print('A _||_ B | C < 7) = ', samp.dependence('A', 'B', [('C', None, 7)]), ' Exp: >> 0')
-    print('A _||_ B | C = 2) = ', samp.dependence('A', 'B', [('C', 2)]), ' Exp: >> 0')
-    print('A _||_ B | C = 12) = ', samp.dependence('A', 'B', [('C', 12)]), ' Exp: >> 0')
-    print('A _||_ B | C) = ', samp.dependence('A', 'B', ['C']), ' Exp: >> 0')
+    print('C _||_ N = ', samp.dependence('C', 'N'), ' Exp: ~ 0')
+    print('A _||_ B | C >= 8 = ', samp.dependence('A', 'B', [('C', 8, None)]), ' Exp: >> 0')
+    print('A _||_ B | C < 7 = ', samp.dependence('A', 'B', [('C', None, 7)]), ' Exp: >> 0')
+    print('A _||_ B | C = 7 = ', samp.dependence('A', 'B', [('C', 7)]), ' Exp: >> 0')
+    print('A _||_ B | C = 6 = ', samp.dependence('A', 'B', [('C', 6)]), ' Exp: >> 0')
+    print('A _||_ B | C = 5 = ', samp.dependence('A', 'B', [('C', 5)]), ' Exp: >> 0')
+    print('A _||_ B | C = 4 = ', samp.dependence('A', 'B', [('C', 4)]), ' Exp: >> 0')
+    print('A _||_ B | C = 3 = ', samp.dependence('A', 'B', [('C', 3)]), ' Exp: >> 0')
+    print('A _||_ B | C = 2 = ', samp.dependence('A', 'B', [('C', 2)]), ' Exp: ~ 0')
+    print('A _||_ B | C = 12 = ', samp.dependence('A', 'B', [('C', 12)]), ' Exp: ~ 0')
+    print('A _||_ B | C = ', samp.dependence('A', 'B', ['C']), ' Exp: >> 0')
     print()
+    print('Testing Conditionalization:')
+    ivaDist = samp.distr('IVA')
+    ivaMean = ivaDist.E()
+    ivaStd = ivaDist.stDev()
+    upper = ivaMean + .5
+    lower = ivaMean - .5
+    diff = upper - lower
+    print('test interval = ', upper - lower)
+    ivcGupper = samp.E('IVC', ('IVA', upper))
+    ivcGlower = samp.E('IVC', ('IVA', lower))
+    print('E( IVC | IVA = upper)', ivcGupper)
+    print('E( IVC | IVA = lower)', ivcGlower)
+    ivcGupper = samp.E('IVC', [('IVA', upper), 'IVB'])
+    ivcGlower = samp.E('IVC', [('IVA', lower), 'IVB'])
+    print('E( IVC | IVA = upper, IVB)', ivcGupper)
+    print('E( IVC | IVA = lower, IVB)', ivcGlower)
+    print('ACE(A,C) = ', (ivcGupper - ivcGlower) / diff, ' Exp: ~ 0')
+    print()
+    print('Testing continuous causal dependence:')
+    print('IVB _||_ IVA = ', samp.dependence('IVB', 'IVA'), ' Exp: >> 0')
+    print('IVA _||_ IVB = ', samp.dependence('IVA', 'IVB'), ' Exp: >> 0')
+    print('IVB _||_ IVC = ', samp.dependence('IVB', 'IVC'), ' Exp: >> 0')
+    print('IVA _||_ IVC = ', samp.dependence('IVA', 'IVC'), ' Exp: >> 0')
+    print('IVA _||_ IVC | IVB = ', samp.dependence('IVA', 'IVC', 'IVB'), ' Exp: ~ 0')
+    print('IVA _||_ IVC | IVB, N = ', samp.dependence('IVA', 'IVC', ['IVB', 'N']), ' Exp: ~ 0')
+
+    print()
+    end = time.time()
+    duration = end - start
+    print('Test Time = ', round(duration))
 
 if __name__ == '__main__':
     filename = 'models/probTestDat.csv'

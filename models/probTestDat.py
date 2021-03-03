@@ -23,24 +23,30 @@ testDescript = 'Reference Data for probability testing.  Do not modify this file
 # - List of Parents
 # - isObserved (Optional, default True)
 # - Data Type (Optional, default 'Numeric')
-model =    [('A', []),
+model =    [
+            # A, B, and C are Dice (A + B) and the total roll (C)
+            ('A', []),
 			('B' , []),
-            #('D', ['A']),
 			('C', ['B', 'A']),
+            # N and N2 are Gaussians in relation N -> N2
             ('N', []),
-            ('N2', ['N'])
+            ('N2', ['N']),
+            # IVs are an inverted V formation for testing conditional dependency
+            # of continuous variables.
+            ('IVA', ['B']),
+            ('IVB', []),
+            ('IVC', ['B', 'A'])
 			]
 
 # Structural Equation Model for data generation
 varEquations = [
-                #'B = choice(range(-bRange, bRange+1))',
                 'A = choice(range(1, 7))',
-			    #'B = 2 * B if uniform() < .2 else B',
                 'B = choice(range(1, 7))',
-                #'D = .5 * A + logistic(3,1)',
-			    #'C = .5 * B + 1 * D + logistic(0,1)',
                 'C = A + B',
                 'N = normal(0,1)',
                 'N2 = N + normal(1,1)',
+                'IVB = logistic(0,1)',
+                'IVA = IVB + logistic(0, 1)',
+                'IVC = 0 * IVA + IVB + logistic(0, 1)',
                 't = t + 1'
 		        ]

@@ -43,7 +43,6 @@ class PDF:
             indx, start, end, prob = bin
             if value >= start and value < end:
                 return i
-        print('no bin found', value, self.min, self.max)
 
     def P(self, valueSpec):
         """ Return the probability of a given value or range of values.
@@ -60,7 +59,7 @@ class PDF:
                         low = None means negative infinity
         """
         outProb = 0.0
-        if type(valueSpec) == type((0,)):
+        if type(valueSpec) == type((0,)) and len(valueSpec) > 1:
             # it's a range tuple
             assert len(valueSpec) == 2, 'pdf.P: valueSpec must be a single number or 2-tuple = ' + str(valueSpec)
             low, high = valueSpec
@@ -73,7 +72,10 @@ class PDF:
             if high <= self.min:
                 return 0.0
             return self.Prange(low, high)
-        value = valueSpec
+        if type(valueSpec) == type((0,)):
+            value = valueSpec[0]
+        else:
+            value = valueSpec
         if value < self.min or value >= self.max:
             return outProb  # Outside the range.  Zero probability.
         for i in range(self.binCount):
@@ -130,7 +132,7 @@ class PDF:
         cum = 0.0
         for i in range(self.binCount):
             bin = self.bins[i]
-            id, min, max, prob = bin
+            prob = bin[3]
             value = self.binValue(i)
             cum += prob * (value - mean)**2
         var = cum
@@ -222,6 +224,7 @@ class PDF:
     def compare(self, other):
         assert len(self.bins) == len(other.bins), "PDF.compare():  Bin sizes must match for each distribution " + str((len(self.bins, len(other.bins))))
         accum = 0.0
+        errs = []
         for i in range(len(self.bins)):
             bin1 = self.bins[i]
             bin2 = other.bins[i]
@@ -229,7 +232,9 @@ class PDF:
             prob2 = bin2[3]
             diff = abs(prob1 - prob2)
             accum += diff
-        return accum / len(self.bins)
+            errs.append(diff)
+        #return accum / len(self.bins)
+        return max(errs)
 
     def isNull(self):
         for val in self.ToHistogram():

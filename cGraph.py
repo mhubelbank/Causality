@@ -40,7 +40,7 @@ class cGraph:
             else:
                 self.edgeDict[d] = [edge]
         # Create a probability sample object for later use
-        self.prob = Prob.Sample(self.data, density = .2, precision=2)
+        self.prob = Prob.Sample(self.data, density = .2, power=2)
         for rvName in self.rvList:
             rv = self.rvDict[rvName]
             if rv.isObserved:
