@@ -56,7 +56,7 @@ def testProb(X, Y, Z=[], power=2):
         varName = 'Z' + str(i)
         d[varName] = standardize(Z[i])
         zNames.append(varName)
-    s = Prob.Sample(d, .2)
+    s = Prob.ProbSpace(d, .2)
     dep = s.dependence('X', 'Y', zNames, power=power)
     print('dep = ', dep)
     if dep <= .15:

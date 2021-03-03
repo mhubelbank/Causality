@@ -6,23 +6,50 @@ from Probability.pdf import PDF
 
 DEBUG = False
 
-class Sample:
+class ProbSpace:
     def __init__(self, ds, density = 1.0, power=1, discSpecs = None):
-        """ Create a probability sample object.  Sample provides a mechanism for analyzing
-            the probability space of a multivariate dataset.
+        """ Probability Space (i.e. Joint Probability Distribution) based on a a multivariate dataset
+            of random variables provided.  'JPS' (Joint Probability Space) is an alias for ProbSpace.
+            The Joint Probability Space is a multi-dimensional probability distribution that embeds all
+            knowledge about the statistical relationships among the variables, and supports a powerful
+            range of queries to expose that information.
             It can handle discrete as well as continuous variables.  Continuous probabilities
-            are managed by discretization (binning) continuous variables into ranges.
+            are managed by dense discretization (binning) continuous variables into small ranges.
             By default, the number of discretized bins for continuous variables is the square
             root of the number of samples.  This can be increased or decreased using the "density"
-            parameter.
+            parameter (see below).  Discrete variables may be binary, categorical or numeric(integer).
+
             Data(ds) is provided as a dictionary of variable name -> ValueList (List of variable values).
             ValueList should be the same length for all variables.  Each index in ValueList represents
             one sample.
+
             The density parameter is used to increase or decrease the number of bins used for continuous
             variables.  If density is 1 (default), then sqrt(N-samples) bins are used.  If density is
-            set to D, then D * sqrt(N-samples) bins are used. 
+            set to D, then D * sqrt(N-samples) bins are used.
+
+            The power parameter is used for stochastic approximation of conditional probabilities.
+            Power may range from 0 (test conditionality at mean only) up to 100 (test every comination
+            of discretized variables).  Values > 0 test more and more points for conditional dependence,
+            until at 100, all points are tested.  For linear relationships, power of 0 or 1 is sufficient,
+            while for complex, discontinuous relationships, higher values may be necessary to achieve
+            high precision.  Power allows a tradeoff between precision and run-time.  High values of
+            power may result in unacceptably long run-times.  In practice, power <= 8 should suffice in
+            most cases.
+
             The discSpecs parameter is used to make recursive calls to the module while
             maintaining the discretization information, and should not be provided by the user.
+
+            ProbSpace includes a 'Plot' function that requires matplotlib, and produces a probability
+            distribution plot for each variable.
+
+            The main functions of ProbSpace are:
+            - P(...) -- Returns the numerical probability of an event, given a set of conditions.
+                P can return joint probabilities as well as univariate probabilities.
+            - E(...) -- Returns the expected value (i.e. mean) of a variable, given a set of conditions.
+            - distr(...) -- Returns a univariate probability distribution (see pdf.py) of a variable
+                given a set of conditions.
+            - dependence(...) -- Measures the dependence between two variables with optional conditioning
+                on a set of other variables (i.e. conditional dependence.).
         """
         self.power = power
         self.ds = ds
@@ -123,10 +150,6 @@ class Sample:
             data[fieldName] = fieldVals
         return data
 
-    def toJointProbability(pdfs):
-        """
-            Convert a series of PDFs, and convert them into a new prob object (multivariate probability)
-        """
     def getMidpoints(self, field):
         indx = self.fieldIndex[field]
         dSpec = self.discSpecs[indx]
@@ -217,57 +240,86 @@ class Sample:
         hashKey = (targetSpec, givenSpec)
         return hashKey
 
-    def E(self, targetSpec, givensSpec):
-        d = self.distr(targetSpec, givensSpec)
+    def E(self, target, givensSpec):
+        """ Returns the expected value (i.e. mean) of the distribution
+            of a single variable given a set of conditions.  This is
+            a convenience function equivalent to:
+                distr(target, givensSpec).E()
+
+            targetSpec is a single variable name.
+            givensSpec is a conditional specification (see distr below
+            for format)
+        """
+        d = self.distr(target, givensSpec)
         return d.E()
 
-    def prob(self, rvSpec, givenSpec=None):
+    def prob(self, targetSpec, givenSpec=None):
         """ Return the probability of a variable or (set of variables)
             attaining a given value (or range of values) given a set
             of conditionalities on other variables.
-            rvSpec may be a single rv specification or list of rv specifications:
-            If it is a list of specifications, then the joint probability of the
-            specifications is returned.
-            An rv specification may be a 2-tuple (varName, value) for the probability
-            of attaining a single value, or may
-            be a 3-tuple: (varName, minValue, maxValue) indicating a range.
-            minValue or maxValue may be None.  A minValue of None implies 
-            -infinity.  A maxValue of None implies infinity.
-            givenSpec has the same format as rvSpec with equivalent meanings
+            'P' is an alias for prob.
+            The basic form is the probability of Y given X or the probability
+            of targetSpec given givenSpec, where X and Y represent events or lists
+            of simultaneous events:
+                P(Y=y | X=x) = P(targetSpec | givenSpec)
+
+            targetSpec (target specification) defines the result to be returned
+            (i.e. the event or set of events whose probability is to be determined).
+            A target specification may take one of several forms:
+            - 2-tuple (varName, value) for the probability
+                of attaining a single value
+            - 3-tuple: (varName, minValue, maxValue) indicating an interval:
+                [minValue, maxValue) (i.e. minValue <= value < maxValue).
+                minValue or maxValue may be None.  A minValue of None implies 
+                -infinity.  A maxValue of None implies infinity.
+            - list of either of the above or any combination.  In this case, the joint 
+                probability of the events is returned.
+            
+            givenSpec (optional) has the same format as targetSpec with equivalent meanings
             for the givens.  A given specification supports one additional flavor which
             is a single variable name.  This means that that variable should be
-            "conditionalized" on.
+            "conditionalized" on.  
             The three flavors (varName, 2-tuple, 3-tuple)
-            may be mixed within a givenSpec.
+            may be mixed within a givenSpec, presented as a list of givens.
 
             Examples:
             - prob(('A', 1)) -- The probability that variable A takes on the value 1.
-            - prob([('A', 1), ('B', 2)]) -- The probability that A is 1 and B is 2.
+            - prob([('A', 1), ('B', 2)]) -- The (joint) probability that A is 1 and B is 2.
             - prob(('A', .1, .5)) -- The probability that A is in the range [.1, .5).
             - prob(('A', .1, .5), [('B', 0, 1), ('C', -1, None)] -- The probability that
                     A is on interval [.1, .5) given that B is on interval [0,1) and
                     C is on interval [-1, infinity).
+            - prob(('A', .1, .5), [('B', 0, 1), ('C', -1, None), 'D'] -- The probability that
+                variable A is on interval [.1, .5) given that B is on interval [0, 1) and
+                    C is on interval [-1, infinity), conditionalized on D.
+    
+            Conditionalization is taking the probability weighted sum of the results for every value
+            of the conditionalizing variable or combination of conditionalizing variables.
+            For example:
+            - P(A=1 | B=2, C) is: sum over all (C=c) values( P(A=1 | B=2, C=c) * P(C=c))
         """
         if givenSpec is None:
             givenSpec = []
         if type(givenSpec) != type([]):
             givenSpec = [givenSpec]
-        cacheKey = self.makeHashkey(rvSpec, givenSpec)
+        cacheKey = self.makeHashkey(targetSpec, givenSpec)
         if cacheKey in self.probCache.keys():
             return self.probCache[cacheKey]
-        if type(rvSpec) == type([]):
+        if type(targetSpec) == type([]):
             # Joint probability
-            rvSpecU, rvSpecB = self.separateSpecs(rvSpec)
-            assert len(rvSpecU) == 0, 'prob.P: All target specifications must be bound (i.e. specified as tuples).  For unbound returns, use distr.)'
-            result = self.jointProb(rvSpec, givenSpec)
+            # Separate unbound (e.g. A) specifications from bound (e.g. A=1) specifications
+            # Prob doesn't return unbound results.
+            targetSpecU, targetSpec = self.separateSpecs(targetSpec)
+            assert len(targetSpecU) == 0, 'prob.P: All target specifications must be bound (i.e. specified as tuples).  For unbound returns, use distr.)'
+            result = self.jointProb(targetSpec, givenSpec)
             self.probCache[cacheKey] = result
             return result
         else:
-            rvName = rvSpec[0]
-            if len(rvSpec) == 2:
-                valSpec = rvSpec[1]
+            rvName = targetSpec[0]
+            if len(targetSpec) == 2:
+                valSpec = targetSpec[1]
             else:
-                valSpec = rvSpec[1:]
+                valSpec = targetSpec[1:]
             d = self.distr(rvName, givenSpec)
             result = d.P(valSpec)
             self.probCache[cacheKey] = result
@@ -276,28 +328,41 @@ class Sample:
     P = prob
 
     def distr(self, rvName, givenSpecs=None, power=None):
-        """Return a probability distribution as a PDF (see pdf.py) for the random variable
+        """Return a univariate probability distribution as a PDF (see pdf.py) for the random variable
            indicated by rvName.
            If givenSpec is provided, then will return the conditional distribution,
            otherwise will return the unconditional (i.e. marginal) distribution.
            This satisfies the following types of probability queries:
-            - P(Y)
+            - P(Y) -- (marginal) Probability distribution of Y
             - P(Y | X=x) -- Conditional probability
             - P(Y | X1=x1, ... ,Xk = xk) -- Multiple conditions
             - P(Y | X=x, Z) -- i.e. Conditionalize on Z
             - P(Y | X=x, Z1, ... Zk) -- Conditionalize on multiple variables
-            Each spec in givenSpecs may contain a tuple or a single value:
-            - (varName, value) indicates a condition
-            - varName indicates conditionalizing on a variable
-                (i.e. SUM(Y | X1=x1, ... , Xk = xk, Z = z) for all z in Z)
-            If there is only one condition, it can be passed as s single tuple
+
+            rvName is the name of the random variable whose distribution is requested.
+            givenSpec (given specification) defines the conditions (givens) to
+            be applied.
+            A given specification may take one of several forms:
+            - 2-tuple (varName, value) - Variable taking on a given value.
+            - 3-tuple: (varName, minValue, maxValue) indicating an interval:
+                [minValue, maxValue) (i.e. minValue <= value < maxValue).
+                minValue or maxValue may be None.  A minValue of None implies 
+                -infinity.  A maxValue of None implies infinity.
+            - variable name: A variable to conditionalize on.
+            - list of any of the above or any combination of above.
+
             Examples:
-            - distr('Y') -- The marginal probability of Y
+            - distr('Y') -- The (marginal) probability of Y
             - distr('Y', [('X', 1)]) -- The probability of Y given X=1.
             - distr('Y', [('X', 1, 2)]) -- The probability of Y given 1 <= X < 2.
             - distr('Y', ('X', 1)) -- The probability of Y given X=1 (same as above)
             - distr('Y', [('X1', 1), ('X2', 0)]) - The probability of Y given X1 = 1, and X2 = 0
             - distr('Y', [('X', 1), 'Z']) -- The probability of Y given X = 1, conditionalized on Z
+
+            Conditionalization is taking the probability weighted sum of the results for every value
+            of the conditionalizing variable or combination of conditionalizing variables.
+            For example:
+            - P(Y | X=1, Z) is: sum over all (Z=z) values( P(Y | X=1, Z=z) * P(Z=z))
         """
         if DEBUG:
             print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
@@ -347,7 +412,7 @@ class Sample:
                 # and return the filtered dist
                 newData = self.filter(filtSpecs)
                 # Create a new probability object based on the filtered data
-                filtSample = Sample(newData, density = self.density, discSpecs = self.discSpecs)
+                filtSample = ProbSpace(newData, density = self.density, discSpecs = self.discSpecs)
                 #filtSample = Sample(newData, density = self.density)
                 outPDF = filtSample.distr(rvName)
             else:
@@ -740,7 +805,10 @@ class Sample:
         rho = num1 / (denom1**.5 * denom2**.5)
         return rho
 
-    def plot(self):
+    def Plot(self):
+        """ Plot the distribution of each variable in the joint probability space
+            using matplotlib.
+        """
         inf = 10**30
         plotDict = {}
         minX = inf
@@ -775,3 +843,4 @@ class Sample:
             plotDict[var] = yvals
         plotDict['_x_'] = xvals
         probCharts.plot(plotDict)
+
