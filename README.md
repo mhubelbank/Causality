@@ -24,26 +24,32 @@ _cGraph.py_ (Causal Graph) is the heart of the system.  It accepts a multivariat
 
 ## Conditional Probability
 
-_Probability/Prob.py_ provides a powerful multivariate conditional probability analysis system.  It equally supports both discrete (including categorical) and continous data, or any mixture of the above.  Given a set of data, Prob allows a wide range of queries including:
+_Probability/Prob.py_ provides a powerful multivariate conditional probability analysis system.  It equally supports both discrete (including binary and categorical) and continous data, or any mixture of the above.  Given a set of data, Prob allows a wide range of queries including:
+### Numerical Probabilities and Conditional Probabilities
 - P(X=x) -- The numeric probability that X takes on the value x.
 - P(X=x, Y=y) -- Joint Probability -- The probability that X=x and Y=y simultaneously.
 - P(Y=y | X=x) -- The numerical probability that Y takes on the value y, given that X is observed to have the value x.
-- P(Y | X=x, ... , Z=z) -- The conditional probability distribution of Y, given the values of multiple variables.
 - P(Y=y | X=x, ... , Z=z) -- The numerical probability that Y takes on the value y, given the values of multiple variables.
 - P(Y=y | X) -- The numerical probability that Y=y when conditionalized on X.  This is equivalent to the sum of P(Y=y | X=x) * P(X=x), for every value x of X.
+P(Y=y | X=x, Z) -- The numerical probability that Y=y,  given that X=x and conditionalized on Z. There may be additional givens, and multiple variables may be conditionalized on.
+
+### Probability Distributions and Conditional Probability Distributions
 - P(X) -- The probability distribution of any variable X.  Presented as a PDF (Probability Distribution Function), which is actually a discretized version of the probability distribution.
 - P(Y | X=x) -- Conditional Probability -- The probability distribution of Y given that X is observed to have the value x.
 - P(Y | X=x, ... , Z=z) -- The probability distribution of Y, given the values of multiple variables.
 - P(Y | X) -- The probability distribution of Y when conditionalized on X.  This is equivalent to the sum of P(Y | X=x) * P(X=x), for every value x of X.
+- P(Y | X=x, ... , Z=z) -- The conditional probability distribution of Y, given the values of multiple variables.
 - P(Y | X=x, Z) -- The probability distribution of Y given that X=x and conditionalized on Z.  There may be additional givens, and multiple variables may be conditionalized on.
-- P(Y=y | X=x, Z) -- The numerical probability that Y=y,  given that X=x and conditionalized on Z. There may be additional givens, and multiple variables may be conditionalized on.
-- P(X=x, Y=y, ... ,Z=z) -- The numerical joint probability of multiple events occurring simultaneously.
+- ### Depency Testing and Conditional Dependency Testing
 - Dependence(X, Y) -- The numerical dependency measured between X and Y.
 - Dependence(X, Y | Z=z, W=w) -- The numerical dependency measured between X and Y given one or more observed covariate values.
 - Dependence(X, Y | Z=z, W) -- The numerical dependency measured between X and Y, given that Z=z and conditionalized on W.  There may be multiple conditional values or variables to conditionalize on.
-
-This module also
-
+### Independence Testing and Conditional Independence Testing
+- Independence(X, Y | Z=z, W) -- All the flavors of conditional independence, as with dependence (above), but inverted and scaled.
+- isIndependent(X, Y | Z=z, W) -- All flavors of conditional independence. returns Boolean, True if independent, otherwise False.
+### Distribution Plots
+- The Plot function displays a matplotlib plot of the distribution of each varable.
+### PDF Objects
 Probability/pdf.py Provides a Probability Distribution Function object, which is a finely discretized probability distribution.  This is returned by Prob (above) whenever a probability distribution is requested.  The following functions are available for a PDF:
 - pdf.P(v) -- The probability of a value "v" occurring.
 - pdf.E() -- The Expected Value of the distribution (i.e. mean).  This is the first "standard moment" of the distribution.
@@ -89,12 +95,17 @@ interventionTest.py provides a test and demonstration of the intervention logic,
     Example:
         python3 interventionTest.py models/M3.py
 
-probTest.py is a test for the probability system, and demonstrates the use of the probability system using synthetic data.  It is hardcoded for particular models but can be modified locally for testing any model.
+probTest.py is a comprehensive test for the probability system, and demonstrates the use of the probability system using synthetic data.  It is hardcoded to use the data file models/probTestDat.py.
 
-    python probTest.py <model file>
+    python3 probTest.py
+
+
+probPlot.py presents a plot of the probability distribution of each variable in a dataset using matplotlib.
+
+    python3 probPlot.py <model file>
 
     Example:
-        python3 probTest.py models/M1.py
+        python3 probPlot.py models/M7.py
 
 ## References:
 
