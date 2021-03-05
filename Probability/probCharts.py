@@ -8,7 +8,9 @@ def plot(distDict):
     # Make a data frame
     yvals = []
     xmax = 0
-    numVars = len(list(distDict.keys()))
+    vars = list(distDict.keys())
+    vars.sort()
+    numVars = len(vars) - 1 # Don't count the _x_ variable
     for key in distDict.keys():
         if key == '_x_':
             dat = distDict[key]
@@ -24,10 +26,8 @@ def plot(distDict):
 
     cols = 3
     rows = math.ceil(numVars / cols)
-
-    print('xmin, xmax, ymin, ymax = ', xmin, xmax, ymin, ymax)    
+ 
     df = pd.DataFrame(distDict)
-    #df=pd.DataFrame({'x': range(1,11), 'y1': np.random.randn(10), 'y2': np.random.randn(10)+range(1,11), 'y3': np.random.randn(10)+range(11,21), 'y4': np.random.randn(10)+range(6,16), 'y5': np.random.randn(10)+range(4,14)+(0,0,0,0,0,0,0,-3,-8,-6), 'y6': np.random.randn(10)+range(2,12), 'y7': np.random.randn(10)+range(5,15), 'y8': np.random.randn(10)+range(4,14), 'y9': np.random.randn(10)+range(4,14) })
     
     # Initialize the figure
     plt.style.use('seaborn-darkgrid')

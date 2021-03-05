@@ -35,7 +35,9 @@ model =    [
             # of continuous variables.
             ('IVA', ['B']),
             ('IVB', []),
-            ('IVC', ['B', 'A'])
+            ('IVC', ['B', 'A']),
+            # Exponential distribution
+            ('EXP', [])
 			]
 
 # Structural Equation Model for data generation
@@ -48,5 +50,6 @@ varEquations = [
                 'IVB = logistic(0,1)',
                 'IVA = IVB + logistic(0, 1)',
                 'IVC = 0 * IVA + IVB + logistic(0, 1)',
+                'EXP = exponential()',
                 't = t + 1'
 		        ]

@@ -57,12 +57,9 @@ def testProb(X, Y, Z=[], power=2):
         d[varName] = standardize(Z[i])
         zNames.append(varName)
     s = Prob.ProbSpace(d, .2)
-    dep = s.dependence('X', 'Y', zNames, power=power)
-    print('dep = ', dep)
-    if dep <= .15:
-        return 1.0
-    else:
-        return 0
+    ind = s.independence('X', 'Y', zNames, power=power)
+    return ind
+
 
 def test(X, Y, Z=[]):
     #p_val = testFCIT(X, Y, Z)

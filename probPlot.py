@@ -40,7 +40,7 @@ g = cGraph.cGraph(gnodes, data)
 
 g.printGraph()
 
-g.prob.plot()
+g.prob.Plot()
 
 end = time.time()
 duration = end - start

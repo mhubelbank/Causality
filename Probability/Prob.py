@@ -533,7 +533,7 @@ class ProbSpace:
                     accum += [[(rvName,) + val] + childVal for childVal in childVals]
             return accum
 
-    def dependence_new(self, rv1, rv2, givens=[], power = None):
+    def dependence_experimental(self, rv1, rv2, givens=[], power = None):
         """ givens is [given1, given2, ... , givenN]
         """
         if power is None:
@@ -617,17 +617,18 @@ class ProbSpace:
                 uSpecs.append(spec)
         return uSpecs, bSpecs
 
-    def dependence(self, rv1, rv2, givens=None, power=None):
-        """ givens is [given1, given2, ... , givenN]
+    def dependence(self, rv1, rv2, givensSpec=None, power=None):
+        """ Calculate the dependence between two random variables, optionally
+            given a set of bound or unbound other variables.
         """
         if power is None:
             power = self.power
-        if givens is None:
-            givens = []
-        if type(givens) != type([]):
-            givens = [givens]
+        if givensSpec is None:
+            givensSpec = []
+        if type(givensSpec) != type([]):
+            givensSpec = [givensSpec]
         # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
-        givensU, givensB = self.separateSpecs(givens)
+        givensU, givensB = self.separateSpecs(givensSpec)
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
@@ -635,17 +636,18 @@ class ProbSpace:
         # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
         # For level = 3, we test the mean + 6 more values.
         condFiltSpecs = self.getCondSpecs(givensU + [rv2], power)
-        prevGivensSpec = None
+        prevGivens = None
         prevProb1 = None
         numTests = 0
         for spec in condFiltSpecs:
+            # spec is rv2 + any other unbound conditions to test.
             # Compare P(Y | Z) with P(Y | X,Z)
-            # givensSpec is conditional on givens without rv2
-            givensSpec = spec[:-1]
-            if givensSpec != prevGivensSpec:
+            # givens is all unbound conditions without rv2 (i.e. X)
+            givens = spec[:-1]
+            if givens != prevGivens:
                 # Only recompute prob 1 when givensValues change
-                if givensSpec:
-                    prob1 = self.distr(rv1, givensSpec + givensB)
+                if givens:
+                    prob1 = self.distr(rv1, givens + givensB)
                 else:
                     prob1 = self.distr(rv1, givensB)
             else:
@@ -654,7 +656,7 @@ class ProbSpace:
             prob2 = self.distr(rv1, spec + givensB)
             if prob2.N < 5:
                 continue
-            prevGivensSpec = givensSpec
+            prevGivens = givens
             prevProb1 = prob1
             mean1 = prob1.E()
             mean2 = prob2.E()
@@ -692,8 +694,38 @@ class ProbSpace:
             dependence = accum / accumProb
             return dependence
         else:
-            print('Cond distr too small.  Accuracy may be impaired: ', rv1, rv2, givens)
+            print('Cond distr too small.  Accuracy may be impaired: ', rv1, rv2, givensSpec)
             return 0.0
+
+    def independence(self, rv1, rv2, givensSpec=None, power=None):
+        """
+            Calculate the independence between two variables, and an optional set of givens.
+            This is a heuristic inversion
+            of the dependence calculation to match other independence measures which return
+            the likelihood of the null hypothesis that the variables are dependent.
+            A threshold of .1 is generally used.  Values below that are considered dependent.
+            givens are formatted the same as for prob(...).
+            TO DO: Calibrate to an exact p-value.
+        """
+        dep = self.dependence(rv1, rv2, givensSpec=givensSpec, power=power)
+        # Bound it to [0, 1]
+        dep = max([min([dep, 1]), 0])
+        if dep > .15:
+            # .15 is the experimental best threshold for separating dependence from independence.
+            # Invert the dependence in interval (.15, 1.0] and map it onto [0, .1]
+            ind = (1-dep) * (.1 / .85)
+        else:
+            # Invert the dependence in interval [0, .15] and map it onto (.1, 1]
+            ind = 1 - dep * (.9 / .15)
+        return ind
+
+    def isIndependent(self, rv1, rv2, givensSpec=None, power=None):
+        """ Determines if two variables are independent, optionally given a set of givens.
+            Returns True if independent, otherwise False
+        """
+        ind = self.independence(rv1, rv2, givensSpec = givensSpec, power = power)
+        # Use .1 (90% confidence as threshold.
+        return ind >= .1
 
     def jointValues(self, rvList):
         """ Return a list of the joint distribution values for a set of variables.
