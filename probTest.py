@@ -22,9 +22,9 @@ def run(filename):
     a = ps.distr('A')
     mean = a.mean()
     std = a.stDev()
-    print('stats(dice1): mean, std, skew, kurtosis = ', mean, std, a.skew(), a.kurtosis(), ' Exp: (3.5, ?, 0, ?)')
+    print('stats(dice1): mean, std, skew, kurtosis, median, mode = ', mean, std, a.skew(), a.kurtosis(), ' Exp: (3.5, ?, 0, ?)')
     c = ps.distr('C')
-    print('stats(d1 + d2): mean, std, skew, kurtosis = ', c.E(), c.stDev(), c.skew(), c.kurtosis(), ' Exp: (7, ?, 0, ?)')
+    print('stats(d1 + d2): mean, std, skew, kurtosis, median, mode = ', c.E(), c.stDev(), c.skew(), c.kurtosis(), c.median(), c.mode(), ' Exp: (7, ?, 0, ?, 7, 7)')
     d = ps.distr('EXP')
     print('stats(Exponential): mean, std, skew, kurtosis = ', d.E(), d.stDev(), d.skew(), d.kurtosis(), ' Exp: (1, 1, 2, 6)')
     #print('fieldstats(Exponential) = ', ps.fieldStats('EXP'))
@@ -32,7 +32,7 @@ def run(filename):
     print('stats(Logistic): mean, std, skew, kurtosis = ', d.E(), d.stDev(), d.skew(), d.kurtosis(), ' Exp: (0, 1.8138, 0, 1.2)')
     #print('fieldstats(Logistic) = ', ps.fieldStats('IVB'))
     d = ps.distr('N')
-    print('stats(Normal):  mean, std, skew, kurtosis = ', d.E(), d.stDev(), d.skew(), d.kurtosis(), 'Exp: (0, 1, 0, 0)')
+    print('stats(Normal):  mean, std, skew, kurtosis, median = ', d.E(), d.stDev(), d.skew(), d.kurtosis(), d.median(), 'Exp: (0, 1, 0, 0)')
     #print('fieldstats(Normal) = ', ps.fieldStats('N'))
     d = ps.distr('N2')
     print('stats(N2: sum of normals):  mean, std, skew, kurtosis = ', d.E(), d.stDev(), d.skew(), d.kurtosis(), 'Exp: (1, 1.414, 0, 0)')
@@ -63,7 +63,7 @@ def run(filename):
     print('P( A = 2, B = 5 | C = 7) = ', ps.P([('A', 2), ('B', 5)], ('C', 7)), ' Exp: 1/6 (.166...)')
     print('P( A = 2, B = 5, N < 0| C = 7) = ', ps.P([('A', 2), ('B', 5), ('N', None, 0)], ('C', 7)), ' Exp: 1/12 (.08333...)')    
     print('E( C | A = 1, B = 6) = ', ps.distr('C', [('A', 1), ('B', 6)]).E(), ' Exp: 7')
-    print('E( C | A = 1, B <= 5) = ', ps.distr('C', [('A', 1), ('B', 5, None)]).E(), ' Exp: 6.5')
+    print('E( C | A = 1, B >= 5) = ', ps.distr('C', [('A', 1), ('B', 5, None)]).E(), ' Exp: 6')
     print()
     print('Testing continuous distributions.  Using N = normal(0, 1)')
     n = ps.distr('N')
@@ -82,6 +82,7 @@ def run(filename):
     print('Dependence testing.  Note: values < .15 are considered ~ 0.:')
     print('A _||_ B = ', ps.dependence('A', 'B'), ' Exp: ~ 0')
     print('A _||_ C = ', ps.dependence('A', 'C'), ' Exp: >> 0')
+    print('B _||_ C = ', ps.dependence('B', 'C'), ' Exp: >> 0')
     print('N _||_ N2 = ', ps.dependence('N', 'N2'), ' Exp: >> 0')
     print('N _||_ C = ', ps.dependence('N', 'C'), ' Exp: ~ 0')
     print('C _||_ N = ', ps.dependence('C', 'N'), ' Exp: ~ 0')
@@ -145,7 +146,28 @@ def run(filename):
     invpB_A = pA_B * pB / pA
     err = abs(invpB_A - pB_A)
     print('Inverse P(0 <= IVB < 1 | 1 <= IVA < 2) vs measured (Bayes(P(IVB | IVA)), P(IVB | IVA), diff): ',invpB_A, pB_A, err, ' Exp: ~ 0' )
-
+    print()
+    print('Testing Prediction:')
+    testDat = {'A':[2, 3, 6], 'B':[5, 2, 6]}
+    predDat = ps.Predict('C', testDat)
+    for p in range(len(predDat)):
+        val = predDat[p]
+        a = testDat['A'][p]
+        b = testDat['B'][p]
+        print('Prediction(C) for A = ', a, ', B = ', b, ', = pred(C) = ', val, ' Exp:', a + b)
+    predDat = ps.Classify('C', testDat)
+    for p in range(len(predDat)):
+        val = predDat[p]
+        a = testDat['A'][p]
+        b = testDat['B'][p]
+        print('Classification(C) for A = ', a, ', B = ', b, ', = pred(C) = ', val, ' Exp:', a + b)    
+    testDat = {'N':[.5, 1, 1.5, 2, 2.5, 3], 'B':[1,2,3,4,5,6]}
+    predDists = ps.PredictDist('N2', testDat)
+    for p in range(len(predDists)):
+        d = predDists[p]
+        n = testDat['N'][p]
+        b = testDat['B'][p]
+        print('Prediction(N2) for N = ', n, ', B = ', b, ', = pred(N2 (mean, std)) = ', d.E(), d.stDev(), ' Exp:', n + 1, ', 1')
     print()
     end = time.time()
     duration = end - start

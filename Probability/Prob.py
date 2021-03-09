@@ -170,13 +170,21 @@ class ProbSpace:
         bucketCount = dSpec[0]
         return range(bucketCount)
 
-    def filter(self, filtSpecs):
+    def filter(self, filtSpec):
         """ Filter the data based on a set of filterspecs: [filtSpec, ...]
             filtSpec := (varName, value) or (varName, lowValue, highValue)
         """
+        filtdata = self.filterDat(filtSpec)
+        # Now convert to orginal format, with only records that passed filter
+        outData = self.toOriginalForm(filtdata)
+        return outData
+
+    def filterDat(self, filtSpec, adat = None):
+        if adat is None:
+            adat = self.aData
         filtSpecs2 = []
         # Transform filtSpecs from (varName, value) to (varIndex, discretizedValue)
-        for filt in filtSpecs:
+        for filt in filtSpec:
             if len(filt) == 2:
                 field, value = filt
                 indx = self.fieldIndex[field]
@@ -195,9 +203,7 @@ class ProbSpace:
                     low = varMin
                 if high is None:
                     high = varMax
-                dValueL = np.digitize(low, edges[:-1]) - 1
-                dValueH = np.digitize(high, edges[:-1]) - 1
-                filtSpecs2.append((indx, dValueL, dValueH))
+                filtSpecs2.append((indx, low, high))
 
         remRecs = []
         for i in range(self.N):
@@ -211,18 +217,16 @@ class ProbSpace:
                         include = False
                         break
                 else:
-                    fieldInd, dValueL, dValueH = filt
-                    datBin = self.discretized[fieldInd, i]
-                    if datBin < dValueL or datBin > dValueH:
+                    fieldInd, low, high = filt
+                    val = adat[fieldInd, i]
+                    if val < low or val >= high:
                         include = False
                         break
             if not include:
                 remRecs.append(i)
         # Remove all the non included rows
-        filtered = np.delete(self.aData, remRecs, 1)
-        # Now convert to orginal format, with only records that passed filter
-        orgFilt = self.toOriginalForm(filtered)
-        return orgFilt
+        filtered = np.delete(adat, remRecs, 1)
+        return filtered
 
     def binToVal(self, field, bin):
         indx = self.fieldIndex[field]
@@ -412,7 +416,7 @@ class ProbSpace:
                 # and return the filtered dist
                 newData = self.filter(filtSpecs)
                 # Create a new probability object based on the filtered data
-                filtSample = ProbSpace(newData, density = self.density, discSpecs = self.discSpecs)
+                filtSample = ProbSpace(newData, density = self.density, discSpecs = self.discSpecs, power = self.power)
                 #filtSample = Sample(newData, density = self.density)
                 outPDF = filtSample.distr(rvName)
             else:
@@ -497,12 +501,12 @@ class ProbSpace:
                         testVals.append((mean - tp * std - delta * std, mean - tp * std + delta * std))
                         testVals.append((mean + tp * std - delta * std, mean + tp * std + delta * std))
             return testVals
-        levelSpecs0 = [.5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        levelSpecs0 = [.25, .75, .5, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
         maxLevel = 3 # Largest standard deviation to sample
         if power <= 8:
             levelSpecs = levelSpecs0
         elif power < 100:
-            levelSpecs = range(1/power, maxLevel + 1/power, 1/power)
+            levelSpecs = np.range(1/power, maxLevel + 1/power, 1/power)
         else:
             levelSpecs = None
         if levelSpecs:
@@ -836,6 +840,154 @@ class ProbSpace:
             denom2 += diff2**2
         rho = num1 / (denom1**.5 * denom2**.5)
         return rho
+
+    def dat2jds(self, adat):
+        ds = self.toOriginalForm(adat)
+        jds = ProbSpace(ds, density = self.density, discSpecs = self.discSpecs, power=self.power)
+        return jds
+
+    def distill(self, filters, minPoints):
+        """
+            Progressively filter the data set until at least minPoints
+            records (observations) remain, or all filters have been used.
+            This is used to filter in the case where filters may be overspecified.
+        """
+        adat = self.aData
+        for f in range(len(filters)):
+            filt = filters[f]
+            filtDat = self.filterDat2([filt], adat = adat)
+            sh = filtDat.shape
+            datLen = sh[1]
+            #if datLen < 1:
+            #    print('eliminating: ', filt)
+            #    break
+            adat = filtDat
+        return adat
+
+    def filterDat2(self, filtSpec, adat = None):
+        if adat is None:
+            adat = self.aData
+        remRecs = []
+        N = adat.shape[1]
+        for i in range(N):
+            include = True
+            for filt in filtSpec:
+                if len(filt) == 2:
+                    field, val = filt
+                    fieldInd = self.fieldIndex[field]
+                    if adat[fieldInd, i] != val:
+                        include = False
+                        break
+                else:
+                    field, valL, valH = filt
+                    fieldInd = self.fieldIndex[field]
+                    fieldVal = adat[fieldInd, i]
+                    if fieldVal < valL or fieldVal >= valH:
+                        include = False
+                        break
+            if not include:
+                remRecs.append(i)
+        # Remove all the non included rows
+        filtered = np.delete(adat, remRecs, 1)
+        return filtered
+
+    def Predict(self, Y, X):
+        """
+            Y is a single variable name.  X is a dataset.
+        """
+        dists = self.PredictDist(Y, X)
+        preds = [dist.E() for dist in dists]
+        return preds
+
+    def Classify(self, Y, X):
+        """
+            Y is a single variable name.  X is a dataset.
+        """
+        assert self.isDiscrete(Y), 'Prob.Classify: Target variable must be discrete.'
+        dists = self.PredictDist(Y, X)
+        preds = [dist.mode() for dist in dists]
+        return preds
+
+    def PredictDist(self, Y, X):
+        """
+            Y is a single variable name.  X is a dataset.
+        """
+        delta = .1 # small range of standard deviations around the variable
+        maxAttempts = 5
+
+        outPreds = []
+        # Make sure Y is not in X
+        vars = list(X.keys())
+        vars.remove(Y)
+        # Sort the independent variables by dependence with Y
+        deps = [(self.dependence(var, Y, power=3), var) for var in vars]
+        deps.sort()
+        deps.reverse()
+        #print('deps = ', deps)
+        vars = []
+        # Remove any independent independents
+        for i in range(len(deps)):
+            dep = deps[i]
+            if dep[0] < .05:
+                print('Prob.PredictDist: rejecting variables due to independence from target(p-value, var): ', deps[i:])
+                break
+            else:
+                vars.append(dep[1])
+        #print('vars = ', vars)
+        # Vars now contains all the variables that are not indpendent from Y, sorted in
+        # order of highest dependence.
+
+        # Get the standard deviation for each variable
+        sigmas = {}
+        for var in vars:
+            aggs = self.fieldAggs[var]
+            sigma = aggs[3]
+            sigmas[var] = sigma
+
+        # Get the number of items to predict:
+        numTests = len(X[vars[0]])
+        maxVals = int(self.N**.5)
+        minVals = 20
+        allDiscrete = True
+        for var in vars:
+            if not self.isDiscrete(var):
+                allDiscrete = False
+                break
+        for i in range(numTests):
+            deltaAdjust = 1.0
+            for attempt in range(maxAttempts):
+                delta2 = deltaAdjust * delta
+                filts = []
+                for var in vars:
+                    sigma = sigmas[var]
+                    #print('sigma = ', sigma)
+                    val = X[var][i]
+                    if self.isDiscrete(var):
+                        filts.append((var, val))
+                    else:
+                        # For continuous, use a small range around the value
+                        filts.append((var, val - delta2 * sigma, val + delta2 * sigma))
+                # Determine the minimum and maximum number of points to use for filtering the distribution
+                #print('#', i, ', filts = ', filts)
+                adat = self.distill(filts, minVals)
+                jds = self.dat2jds(adat)
+                dist = jds.distr(Y)
+                N = dist.N
+                #print('N = ', N)
+                if (N >= minVals and N <= maxVals) or attempt == maxAttempts - 1 or allDiscrete:
+                    #print('distr = ', dist.ToHistTuple())
+                    outPreds.append(dist)
+                    break
+                else:
+                    if N == 0:
+                        deltaAdjust *= 5
+                    elif N < minVals:
+                        deltaAdjust *= min([minVals * 1.1 / float(N), 5.0])
+                    else:
+                        # N > maxVals
+                        deltaAdjust *= max([maxVals * .9 / float(N), .2])
+                    #print('attempt', attempt+1, 'failed', deltaAdjust, N, maxVals)
+        return outPreds
 
     def Plot(self):
         """ Plot the distribution of each variable in the joint probability space
