@@ -918,7 +918,10 @@ class ProbSpace:
         outPreds = []
         # Make sure Y is not in X
         vars = list(X.keys())
-        vars.remove(Y)
+        try:
+            vars.remove(Y)
+        except:
+            pass
         # Sort the independent variables by dependence with Y
         deps = [(self.dependence(var, Y, power=3), var) for var in vars]
         deps.sort()
