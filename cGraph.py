@@ -61,7 +61,9 @@ class cGraph:
 
 
     def getAdjacencies(self, node):
-        return self.edgeDict[node]
+        if node in self.edgeDict.keys():
+            return self.edgeDict[node]
+        return []
 
     def getParents(self, node):
         parents = []

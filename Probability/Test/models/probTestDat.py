@@ -33,9 +33,9 @@ model =    [
             ('N2', ['N']),
             # IVs are an inverted V formation for testing conditional dependency
             # of continuous variables.
-            ('IVA', ['B']),
+            ('IVA', ['IVB']),
             ('IVB', []),
-            ('IVC', ['B', 'A']),
+            ('IVC', ['IVB', 'IVA']),
             # Exponential distribution
             ('EXP', [])
 			]

@@ -1,11 +1,15 @@
-""" This is the main test for prob.py.  It uses the data generator: models/probTestDat.py.
+""" This is the main test for prob.py.  It uses the data generator:
+    Probability/Test/models/probTestDat.py.
     In order to run, you must first generate the test data using
-    python3 synth/synthDataGen.py models/probTestDat.py <numRecords>.  We typically
-    test with 100,000 records, so that is the recommended value for numRecords.
+    python3 synth/synthDataGen.py Probability/Test/models/probTestDat.py <numRecords>.
+    We typically test with 100,000 records, so that is the recommended
+    value for numRecords.
 """
+import sys
+if '.' not in sys.path:
+    sys.path.append('.')
 from Probability.Prob import ProbSpace
 from synth import getData
-import sys
 import time
 
 def run(filename):
@@ -174,5 +178,5 @@ def run(filename):
     print('Test Time = ', round(duration))
 
 if __name__ == '__main__':
-    filename = 'models/probTestDat.csv'
+    filename = 'Probability/Test/models/probTestDat.csv'
     run(filename)
