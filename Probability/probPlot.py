@@ -1,4 +1,12 @@
+"""
+    Present a plot of the distributions for the given .py test file
+    python3 Probabiity/probPlot.py <testfilepath>.py
+    Data should previously have been generated using:
+    python3 synth/synthDataGen.py <testfilepath>.py <numRecs>
+"""
 import sys
+if '.' not in sys.path:
+    sys.path.append('.')
 import rv
 import cGraph
 from synth import getData
@@ -13,7 +21,7 @@ f = open(test, 'r')
 exec(f.read(), globals())
 
 print('Testing: ', test, '--', testDescript)
-start = time.time()
+
 gnodes = []
 
 # 'model' is set when the text file is exec'ed
@@ -41,7 +49,3 @@ g = cGraph.cGraph(gnodes, data)
 g.printGraph()
 
 g.prob.Plot()
-
-end = time.time()
-duration = end - start
-#print('Test Time = ', round(duration))

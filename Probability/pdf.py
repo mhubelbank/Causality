@@ -17,6 +17,10 @@ class PDF:
         self.binCount = len(self.bins)
         self.min = binList[0][1] # min of bin 0
         self.max = binList[self.binCount - 1][2] # max of last bin
+        self.meanCache = None
+        self.varCache = None
+        self.skewCache = None
+        self.kurtCache = None
 
     def binValue(self, i):
         bin = self.bins[i]
@@ -113,17 +117,21 @@ class PDF:
 
     def E(self):
         """Return the expected value (e.g. mean) of the disribution."""
-        cum = 0
-        for i in range(self.binCount):
-            bin = self.bins[i]
-            id, min, max, prob = bin
-            if self.isDiscrete:
-                value = min
-            else:
-                value = (min + max) / 2.0
-            value = self.binValue(i)
-            cum += prob * value
-        return cum
+        if self.meanCache is None:
+            cum = 0
+            for i in range(self.binCount):
+                bin = self.bins[i]
+                id, min, max, prob = bin
+                if self.isDiscrete:
+                    value = min
+                else:
+                    value = (min + max) / 2.0
+                value = self.binValue(i)
+                cum += prob * value
+            self.meanCache = cum
+            return cum
+        else:
+            return self.meanCache
 
     mean = E
     
@@ -176,15 +184,25 @@ class PDF:
         return self.percentile(50.0)
     
     def var(self):
-        mean = self.E()
-        cum = 0.0
-        for i in range(self.binCount):
-            bin = self.bins[i]
-            prob = bin[3]
-            value = self.binValue(i)
-            cum += prob * (value - mean)**2
-        var = cum
-        return var
+        if self.varCache is None:
+            mean = self.E()
+            cum = 0.0
+            for i in range(self.binCount):
+                bin = self.bins[i]
+                prob = bin[3]
+                value = self.binValue(i)
+                cum += prob * (value - mean)**2
+            var = cum
+            # Generate the sample variance by multiplying by N / (N-1)
+            if self.N > 1:
+                sv = var * self.N / (self.N - 1)
+            else:
+                sv = var
+                print('PDF.var: Warning -- Sample too small to compute sample variance = ', self.N)
+            self.varCache = sv
+            return sv
+        else:
+            return self.varCache
 
     def stDev(self):
         var = self.var()
@@ -192,32 +210,53 @@ class PDF:
         return std
 
     def skew(self):
-        mean = self.E()
-        std = self.stDev()
-        if std == 0:
-            return 0.0
-        cum = 0.0
-        for i in range(self.binCount):
-            bin = self.bins[i]
-            id, min, max, prob = bin
-            value = self.binValue(i)
-            cum += prob * ((value-mean) / std)**3
-        return cum
+        if self.skewCache is None:
+            mean = self.E()
+            std = self.stDev()
+            if std == 0:
+                return 0.0
+            cum = 0.0
+            for i in range(self.binCount):
+                bin = self.bins[i]
+                id, min, max, prob = bin
+                value = self.binValue(i)
+                cum += prob * ((value-mean) / std)**3
+            # Generate sample skew by applying correction based on N
+            if self.N > 2:
+                ssk = cum * self.N**2 / ((self.N - 1) * (self.N - 2))
+            else:
+                ssk = cum
+                print('PDF.skew: Warning -- Sample too small to compute sample skew = ', self.N)
+            self.skewCache = ssk
+            return ssk
+        else:
+            return self.skewCache
 
     def kurtosis(self):
         """ Return the excess kurtosis of the distribution"""
-        mean = self.E()
-        std = self.stDev()
-        if std == 0:
-            return 0.0
-        cum = 0.0
-        for i in range(self.binCount):
-            bin = self.bins[i]
-            id, min, max, prob = bin
-            value = self.binValue(i)
-            cum += prob * ((value-mean) / std)**4
-        
-        return cum - 3
+        if self.kurtCache is None:
+            mean = self.E()
+            std = self.stDev()
+            if std == 0:
+                return 0.0
+            cum = 0.0
+            for i in range(self.binCount):
+                bin = self.bins[i]
+                id, min, max, prob = bin
+                value = self.binValue(i)
+                cum += prob * ((value-mean) / std)**4
+            ekurt = cum - 3.0 # Excess Kurtosis
+            self.kurtCache = ekurt
+            return ekurt
+        else:
+            return self.kurtCache
+
+    def stats(self):
+        m1 = self.mean()
+        m2 = self.stDev()
+        m3 = self.skew()
+        m4 = self.kurtosis()
+        return(self.N, m1, m2, m3, m4)
 
     def ToHistogram(self):
         """Convert the pdf to a numpy array of probabilities [P(bin1), ..., P(binN)]"""

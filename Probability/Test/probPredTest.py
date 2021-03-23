@@ -30,7 +30,7 @@ def run(filename):
     #print('te = ',te.keys(), te)
     print()
     print ('Testing probability module\'s prediction capabilities.')
-    ps = ProbSpace(tr, density=1, power=1)
+    ps = ProbSpace(tr, density=1, power=1
     print()
     print('Testing non-linear regression with continuous variables.')
     d = ps.distr('Y')

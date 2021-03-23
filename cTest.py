@@ -42,8 +42,6 @@ g.printGraph()
 
 g.findExogenous()
 
-g.testDirection()
-
 deps = g.computeDependencies(2)
 
 #print('deps = ', deps)

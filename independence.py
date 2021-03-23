@@ -12,57 +12,64 @@ from standardize import standardize
 # X and Y are Dependent given Z.  P-values less than
 # .05 provide a 95% confidence that the variables are dependent.
 # P-values > .05 imply independence (i.e. lack of proof of dependence).
-def testFCIT(X, Y, Z=[]):
+def testFCIT(ps, x, y, z=[]):
     import numpy as np
     from fcit import fcit
-
+    X = [ps.ds[x[0]]]
+    Y = [ps.ds[y[0]]]
+    Z = []
+    for var in z:
+        zdat = ps.ds[var]
+        Z.append(zdat)
     Xa = np.array(X).transpose()
     #print('xshape = ', Xa.shape)
     Ya = np.array(Y).transpose()
     if Z:
         Za = np.array(Z).transpose()
         #print('zshape = ', Za.shape)
-        pval = fcit.test(Xa, Ya, Za)
+        pval = fcit.test(Xa, Ya, Za, num_perm = 10, prop_test = .40)
     else:
-        pval = fcit.test(Xa, Ya, num_perm = 100, prop_test = .40)
+        pval = fcit.test(Xa, Ya, num_perm = 10, prop_test = .40)
     return pval
 
-def testSDCIT(X, Y, Z=[]):
+def testSDCIT(ps, x, y, z=[]):
     import numpy as np
     from sdcit.sdcit_mod import SDCIT
     from sdcit.utils import rbf_kernel_median
-
+    X = [ps.ds[x[0]]]
+    Y = [ps.ds[y[0]]]
+    Z = []
+    for var in z:
+        zdat = ps.ds[var]
+        Z.append(zdat)
     Xa = np.array(X).transpose()
     Ya = np.array(Y).transpose()
     if not Z:
-        return testFCIT(X, Y)
-    #Za = np.zeros((len(Z[0]),))
-    #for i in range(len(Z)):
-    #    Za = np.array(Z[i]) + Za
+        return testFCIT(ps, X, Y)
     Za = np.array(Z).transpose()
     Kx, Ky, Kz = rbf_kernel_median(Xa, Ya, Za)
     test_stat, p_value = SDCIT(Kx, Ky, Kz)
     #print('p = ', p_value)
     return p_value
 
-def testProb(X, Y, Z=[], power=2):
+def testProb(ps, X, Y, Z=[], power=2):
     X = X[0]
     Y = Y[0]
-    d = {}
-    d['X'] = standardize(X)
-    d['Y'] = standardize(Y)
-    zNames = []
-    for i in range(len(Z)):
-        varName = 'Z' + str(i)
-        d[varName] = standardize(Z[i])
-        zNames.append(varName)
-    s = Prob.ProbSpace(d, .2)
-    ind = s.independence('X', 'Y', zNames, power=power)
+    #print('ps, X, Y, Z = ', ps, X, Y, Z)
+    ind = ps.independence(X, Y, Z, power=power)
     return ind
 
 
-def test(X, Y, Z=[]):
-    #p_val = testFCIT(X, Y, Z)
-    p_val = testProb(X, Y, Z, power = 1)
-    #p_val = testSDCIT(X, Y, Z)
+def test(ps, X, Y, Z=[], method=None, power=1):
+    # Valid values for method are: None(default), 'prob', 'fcit', 'sdcit'
+    if method is None:
+        method = 'prob'
+    if method == 'fcit':
+        p_val = testFCIT(ps, X, Y, Z)
+    elif method == 'sdcit':
+        p_val = testSDCIT(ps, X, Y, Z)
+    elif method == 'prob':
+        p_val = testProb(ps, X, Y, Z, power = power)
+    else:
+        print('independence.test:  method = ', method, 'is not supported.')
     return p_val

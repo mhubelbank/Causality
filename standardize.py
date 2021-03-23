@@ -7,4 +7,4 @@ def standardize(series):
     aCentered = a - mu
     sigma = aCentered.std()
     aScaled = aCentered / sigma
-    return aScaled
+    return list(aScaled)

@@ -5,6 +5,7 @@ from Probability import Prob
 from Probability import pdf
 import numpy as np
 import direction
+from standardize import standardize
 
 VERBOSE = 1
 # rvList is a list of random variable (rv) objects
@@ -40,7 +41,7 @@ class cGraph:
             else:
                 self.edgeDict[d] = [edge]
         # Create a probability space object for later use
-        self.prob = Prob.ProbSpace(self.data, density = .2, power=2)
+        self.prob = Prob.ProbSpace(self.data, power=1)
         for rvName in self.rvList:
             rv = self.rvDict[rvName]
             if rv.isObserved:
@@ -156,6 +157,7 @@ class cGraph:
                 dep = self.makeDependency(node1, node2, None, not isSeparated)
                 deps.append(dep)
                 for c in cNodes:
+                    #print('cNodes = ', cNodes)
                     if node1 in c or node2 in c:
                         continue
                     # Verify that every member of c is observed.  If not, we skip this combo.
@@ -167,8 +169,9 @@ class cGraph:
                     if not allObserved:
                         continue
                     isSeparated = not isAdjacent and networkx.d_separated(self.g, {node1}, {node2}, set(c))
-                    dep = self.makeDependency(node1, node2, c, not isSeparated)
+                    dep = self.makeDependency(node1, node2, list(c), not isSeparated)
                     deps.append(dep)
+        #print('deps = ', deps)
         return deps
     
     def formatDependency(self, dep):
@@ -221,7 +224,12 @@ class cGraph:
     #           errStr A human readable error string describing the error
     #
     def TestModel(self, data=None, order=3):
-        numTestTypes = 3
+        # Standardize the data before doing independence testing
+        iData = {}
+        for var in self.data.keys():
+            iData[var] = standardize(self.data[var])
+        ps = Prob.ProbSpace(iData)
+        numTestTypes = 4
         errors = []
         if data is None:
             data = self.data
@@ -231,49 +239,54 @@ class cGraph:
         if VERBOSE:
             print('Testing Model for', len(deps), 'Independencies')
         for dep in deps:
-            x, y, zlist, isDep = dep
-            X = data[x]
-            Y = data[y]
-            #print('X = ', X)
-            #print('Y = ', Y)
-            Z = []
-            if zlist is None:
-                zlist = []
-            if zlist:
-                for z in zlist:
-                    zdat = data[z]
-                    Z.append(zdat)
-                pval = independence.test([X], [Y], Z)
-            else:
-                pval = independence.test([X], [Y])
-            print(x, y, zlist)
+            x, y, z, isDep = dep
+            if z is None:
+                z = []
+            pval = independence.test(ps, [x], [y], z, power=1)
+            print(x, y, z)
             errStr = None
             testType = -1
-            if not Z and self.isExogenous(x) and self.isExogenous(y):
+            if not z and self.isExogenous(x) and self.isExogenous(y):
                 testType = 0
             elif not isDep:
                 testType = 1
             else:
                 testType = 2
             numTestsPerType[testType] += 1
-            if testType == 0 and pval < .1:
+            if testType == 0 and pval < .5:
                 errStr = 'Error (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
-            elif testType == 2 and pval > .1:
+            elif testType == 2 and pval > .5:
                 errStr = 'Warning (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
-                errType = 2
-            elif testType == 1 and pval < .1:
+            elif testType == 1 and pval < .5:
                 errStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
-                errType = 1
             if errStr:
                 if VERBOSE:
                     print('***', errStr)
                     #5/0
-                errors.append((testType, [x], [y], list(zlist), isDep, pval, errStr))
+                errors.append((testType, [x], [y], list(z), isDep, pval, errStr))
                 numErrsPerType[testType] += 1
             elif VERBOSE:
                 print('.',)
+        # Now test directionalities
+        testType = 3
+        dresults = self.testAllDirections()
+        derrs = 0
+        for dresult in dresults:
+            isError, cause, effect, rho = dresult
+            if isError:
+                derrs += 1
+                if abs(rho) < .0001:
+                    resStr = 'True direction could not be verified.'
+                else:
+                    resStr = 'Direction appears to be reversed.'
+                errStr = 'Error (Type 3 -- Incorrect Causal Direction between ' + cause + ' and ' + effect + '. ' + resStr + '.  Rho = ' + str(rho)
+                if VERBOSE:
+                    print('***', errStr)
+                errors.append((testType, [cause], [effect], [], False, rho, errStr))
+                numErrsPerType[testType] += 1
+            numTestsPerType[testType] += 1
         confidence = 1.0
-        failurePenaltyPerType = [1, 1, 1]
+        failurePenaltyPerType = [1, 1, 1, 1]
         errorRatios = [0.0] * numTestTypes
         for i in range(numTestTypes):
             nTests = numTestsPerType[i]
@@ -288,42 +301,49 @@ class cGraph:
             print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
         return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors)
 
-    def testDirection(self):
+    def testDirection(self, x, y):
+        rho = direction.direction(self.data[x], self.data[y])
+        return rho
+        # if abs(R) > epsilon:
+        #     determinate = True
+        #     if R > 0:
+        #         cause = x
+        #         effect = y
+        #     else:
+        #         cause = y
+        #         effect = x
+        # else:
+        #     determinate = False
+        # shouldBe = x + ' -> ' + y
+        # marker = ''
+        # if VERBOSE:
+        #     if determinate:
+        #         if cause + ' -> ' + effect != shouldBe:
+        #             errors += 1
+        #             marker = '***'
+        #         print(marker, cause, '->', effect, ', should be: ', shouldBe, ',R = ', R)
+        #     else:
+        #         if shouldBe != 'Indeterminate':
+        #             marker = '***'
+        #             errors += 1
+        #         print(marker, x, '--', y, ', Indeterminate, should be: ', shouldBe, ',R = ', R)
+    def testAllDirections(self):
         epsilon = .0001
         rvList = list(self.rvList)
         rvList.sort()
         edges = self.g.edges
-        if VERBOSE:
-            print('Testing', len(edges), 'directionalities:')
+        results = []
         errors = 0
         for edge in edges:
             x, y = edge
-            R = direction.direction(self.data[x], self.data[y])
-            if abs(R) > epsilon:
-                determinate = True
-                if R > 0:
-                    cause = x
-                    effect = y
-                else:
-                    cause = y
-                    effect = x
+            rho = self.testDirection(x, y)
+            if rho > epsilon:
+                isError = False
             else:
-                determinate = False
-            shouldBe = x + ' -> ' + y
-            marker = ''
-            if VERBOSE:
-                if determinate:
-                    if cause + ' -> ' + effect != shouldBe:
-                        errors += 1
-                        marker = '***'
-                    print(marker, cause, '->', effect, ', should be: ', shouldBe, ',R = ', R)
-                else:
-                    if shouldBe != 'Indeterminate':
-                        marker = '***'
-                        errors += 1
-                    print(marker, x, '--', y, ', Indeterminate, should be: ', shouldBe, ',R = ', R)
-        if VERBOSE:
-            print('\nerrors = ', errors, '/', len(edges), '\n')
+                isError = True
+                errors += 1
+            results.append((isError, x, y, rho))
+        return results
 
 
     def findExogenous(self):
@@ -356,9 +376,9 @@ class cGraph:
             else:
                 isExo = True
                 for exo in exos:
-                    pval = independence.test([self.data[var]], [self.data[exo]])
+                    pval = independence.test(self.prob, [var], [exo])
                     print('ind ', var, '-', exo, ' = ', pval)
-                    if pval < .1:
+                    if pval < .5:
                         isExo = False
                         break
                         

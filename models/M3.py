@@ -23,9 +23,9 @@ model =    [('B', []),
 # Structural Equation Model for data generation
 varEquations = [
                 #'B = choice(range(-bRange, bRange+1))',
-                'B = logistic(2,3)',
+                'B = logistic(0, 1)',
 			    'A = 1 * B + logistic(0,1)',
-                'D = .5 * A + logistic(3,1)',
-			    'C = .5 * B + 1 * D + logistic(0,1)',
+                'D = 1 * A + logistic(0,1)',
+			    'C = .5 * B + .5 * D + logistic(0,1)',
                 't = t + 1'
 		        ]
