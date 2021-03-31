@@ -231,6 +231,7 @@ class cGraph:
         ps = Prob.ProbSpace(iData)
         numTestTypes = 4
         errors = []
+        warnings = []
         if data is None:
             data = self.data
         numTestsPerType = [0] * numTestTypes
@@ -245,6 +246,7 @@ class cGraph:
             pval = independence.test(ps, [x], [y], z, power=1)
             print(x, y, z)
             errStr = None
+            warnStr = None
             testType = -1
             if not z and self.isExogenous(x) and self.isExogenous(y):
                 testType = 0
@@ -254,17 +256,31 @@ class cGraph:
                 testType = 2
             numTestsPerType[testType] += 1
             if testType == 0 and pval < .5:
-                errStr = 'Error (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+                if pval < .4:
+                    errStr = 'Error (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+                else:
+                    warnStr = 'Warning (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but possible dependence was detected. P-val = ' + str(pval)
             elif testType == 2 and pval > .5:
-                errStr = 'Warning (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
+                if pval > .6:
+                    errStr = 'Error (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
+                else:
+                    warnStr = 'Warning (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but minimal dependence detected.  P-val = ' + str(pval)
             elif testType == 1 and pval < .5:
-                errStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+                if pval < .4:
+                    errStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
+                else:
+                    warnStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but some dependence was detected. P-val = ' + str(pval)
             if errStr:
                 if VERBOSE:
                     print('***', errStr)
                     #5/0
                 errors.append((testType, [x], [y], list(z), isDep, pval, errStr))
                 numErrsPerType[testType] += 1
+            if warnStr:
+                if VERBOSE:
+                    print('***', warnStr)
+                    #5/0
+                warnings.append((testType, [x], [y], list(z), isDep, pval, errStr))
             elif VERBOSE:
                 print('.',)
         # Now test directionalities
@@ -299,7 +315,7 @@ class cGraph:
         numTotalTests = len(deps)
         if VERBOSE:
             print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
-        return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors)
+        return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors, warnings)
 
     def testDirection(self, x, y):
         rho = direction.direction(self.data[x], self.data[y])

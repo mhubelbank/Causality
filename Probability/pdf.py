@@ -1,6 +1,7 @@
 import numpy as np
-from math import sqrt
+from math import sqrt, log, e
 import copy
+
 
 epsilon = .001 # The maximum proability value considered to be zero
 
@@ -9,8 +10,13 @@ class PDF:
         (binNumber, min, max, prob).
         binNumber is the zero based number of the bin (0 - numBins-1)
         min and max are the limits of data values within the bin min <= value < max
-        prob is the probability of a point falling within the current bin."""
-    def __init__(self, numSamples, binList, isDiscrete = False):
+        prob is the probability of a point falling within the current bin.
+        PDF normally uses only discretized data, but if "data" is provided,
+        will use the full set of data.  This slows it down somewhat, and
+        improves accuracy marginally.
+    """
+    def __init__(self, numSamples, binList, isDiscrete = False, data=None):
+        self.data = data
         self.N = numSamples
         self.bins = binList
         self.isDiscrete = isDiscrete
@@ -24,7 +30,7 @@ class PDF:
 
     def binValue(self, i):
         bin = self.bins[i]
-        id, min, max, prob = bin
+        min, max = bin[1:3]
         if self.isDiscrete:
             value = min
         else:
@@ -62,7 +68,7 @@ class PDF:
                         high = None means infinity
                         low = None means negative infinity
         """
-        outProb = 0.0
+        value = None
         if type(valueSpec) == type((0,)) and len(valueSpec) > 1:
             # it's a range tuple
             assert len(valueSpec) == 2, 'pdf.P: valueSpec must be a single number or 2-tuple = ' + str(valueSpec)
@@ -75,22 +81,62 @@ class PDF:
                 high = self.max + 1
             if high <= self.min:
                 return 0.0
-            return self.Prange(low, high)
-        if type(valueSpec) == type((0,)):
+        elif type(valueSpec) == type((0,)):
             value = valueSpec[0]
         else:
             value = valueSpec
-        if value < self.min or value >= self.max:
-            return outProb  # Outside the range.  Zero probability.
-        for i in range(self.binCount):
-            bin = self.bins[i]
-            indx, start, end, prob = bin
-            if value >= start and value < end:
-                outProb = prob
-                break
-        return outProb
+            if value < self.min or value >= self.max:
+                return 0.0  # Outside the range.  Zero probability.
+        if self.data is not None:
+            # We have the actual data. Do an exact calculation.
+            matches = 0
+            if value is None:
+                # Range match
+                for i in range(self.N):
+                    val = self.data[i]
+                    if val >= low and val < high:
+                        matches += 1
+            else:
+                # Exact match
+                for i in range(self.N):
+                    val = self.data[i]
+                    if val == value:
+                        matches += 1
+                #print('matches = ', matches)
+            prob = matches / self.N
+            return prob
+        else:
+            # Calculate based on discretized bins
+            if value is not None:
+                outProb = 0.0
+                # Range match
+                for i in range(self.binCount):
+                    bin = self.bins[i]
+                    indx, start, end, prob = bin
+                    if value >= start and value < end:
+                        outProb = prob
+                        break
+                return outProb
+            else:
+                firstBin = self.getBinForVal(low)
+                lastBin = self.getBinForVal(high)
+                cum = 0.0
+                return self.Prangex(low, high)
+                for i in range(firstBin, lastBin + 1):
+                    bin = self.bins[i]                
+                    indx, bmin, bmax, prob = bin
+                    if i == firstBin and i == lastBin:
+                        adjProb = (high - low) / (bmax - bmin) * prob
+                    elif i == firstBin:
+                        adjProb = (bmax - low) / (bmax - bmin) * prob
+                    elif i == lastBin:
+                        adjProb = (high - bmin) / (bmax - bmin) * prob
+                    else:
+                        adjProb = prob
+                    cum += adjProb
+                return cum
 
-    def Prange(self, minVal, maxVal):
+    def Prangex(self, minVal, maxVal):
         """ Return the probability of x between 2 values
             i.e. P(minVal <= X < maxVal)
         """
@@ -312,8 +358,9 @@ class PDF:
         out.SetHistogram(outHist)
         return out
 
-    def compare(self, other):
-        assert len(self.bins) == len(other.bins), "PDF.compare():  Bin sizes must match for each distribution " + str((len(self.bins, len(other.bins))))
+    def compare2(self, other):
+        # Bin Comparison Method
+        assert len(self.bins) == len(other.bins), "PDF.compare():  Bin sizes must match for each distribution " + str((len(self.bins), len(other.bins)))
         accum = 0.0
         errs = []
         for i in range(len(self.bins)):
@@ -321,11 +368,146 @@ class PDF:
             bin2 = other.bins[i]
             prob1 = bin1[3]
             prob2 = bin2[3]
-            diff = abs(prob1 - prob2)
+            diff = abs(prob1 - prob2) / 2
+            #print('prob1, prob2, diff = ', i, prob1, prob2, diff)
             accum += diff
             errs.append(diff)
-        #return accum / len(self.bins)
-        return max(errs)
+        return accum
+
+    def compare4(self, other):
+        # Range Comparison Method
+        testRanges = 10
+        accum = 0.0
+        minVal1 = self.minVal()
+        minVal2 = other.minVal()
+        maxVal1 = self.maxVal()
+        maxVal2 = other.maxVal()
+        minVal = min([minVal1, minVal2])
+        maxVal = max([maxVal1, maxVal2])
+        #print('minVal, maxVal = ', minVal, maxVal)
+        ranges = list(np.arange(minVal, maxVal + .00001, (maxVal - minVal) / float(testRanges)))
+        #print('ranges =', len(ranges), ranges)
+        errs = []
+        for i in range(testRanges):
+            r1 = ranges[i]
+            r2 = ranges[i+1]
+            p1 = self.P((r1, r2))
+            p2 = other.P((r1,r2))
+            diff = abs(p1 - p2) * (p1 + p2) / 2 
+            #print('i, N1, N2, r1, r1, p1, p2, diff = ', i, self.N, other.N, r1, r2, p1, p2, diff)
+            accum += diff
+            errs.append(diff)
+        return accum
+
+    def compare3(self, other):
+        # Moment comparison method
+        assert len(self.bins) == len(other.bins), "PDF.compare():  Bin sizes must match for each distribution " + str((len(self.bins), len(other.bins)))
+        mean1 = self.mean()
+        mean2 = other.mean()
+        std1 = self.stDev()
+        std2 = other.stDev()
+        dep1 = abs((mean1 - mean2))
+        dep2 = abs((std1 - std2) / (std1 + std2))
+        sk1 = self.skew()
+        sk2 = other.skew()
+        ku1 = self.kurtosis()
+        ku2 = other.kurtosis()
+        dep3 = abs(sk1 - sk2)
+        dep4 = abs(ku1 - ku2)
+        dep3 = 0
+        dep4 = 0
+        dep = max([dep1, dep2, dep3, dep4])
+        return dep
+
+    def compare5(self, other):
+        # Z-statistic
+        mean1 = self.mean()
+        mean2 = other.mean()
+        std1 = self.stDev()
+        std2 = other.stDev()
+        sqrtN1 = sqrt(self.N)
+        sqrtN2 = sqrt(other.N)
+        Z = abs(mean1-mean2) / sqrt((std1/sqrtN1)**2 + (std2/sqrtN2)**2)
+        dep = Z
+        return dep
+
+    # Compare distributions based on the Komogorov-Smirnov Test Statistic
+    ksAlpha = .5 # Confidence level for KS Test.  At this level, the null
+                # hypothesis of independece is rejected.
+    ksThreshold = sqrt(-log(ksAlpha/2) * .5) # Threshold for the ksTest
+
+    def compare(self, other):
+        # Kolmogorov-Smirnov Statistic
+        testRanges = 10
+        minVal1 = self.minVal()
+        minVal2 = other.minVal()
+        maxVal1 = self.maxVal()
+        maxVal2 = other.maxVal()
+        minVal = min([minVal1, minVal2])
+        maxVal = max([maxVal1, maxVal2])
+        #print('minVal, maxVal = ', minVal, maxVal)
+        ranges = list(np.arange(minVal, maxVal + .00001, (maxVal - minVal) / float(testRanges)))
+        #print('ranges =', len(ranges), ranges)
+        N1 = self.N
+        N2 = other.N
+        cdf1 = 0.0
+        cdf2 = 0.0
+        diffs = []
+        for i in range(testRanges):
+            r1 = ranges[i]
+            r2 = ranges[i+1]
+            p1 = self.P((r1, r2))
+            p2 = other.P((r1,r2))
+            cdf1 += p1
+            cdf2 += p2
+            #if p1 > 0 and p2 > 0:
+            diff = abs(cdf1 - cdf2)
+            diffs.append(diff)
+        ks = max(diffs)
+        # Now, convert the raw KS statistic (i.e. D(m,n)) to an alpha
+        # value, where alpha := P(self != other).  That is, the probability
+        # that self and other were not drawn from the same distribution.
+        # This is an inversion of the usual use of KS where comparing D to
+        # an alpha based threshold.
+        alpha = 2 * e**(-2 *(ks/sqrt((N1+N2)/ (N1*N2)))**2)
+        print('N1, N2, D, alpha = ', N1, N2, ks, alpha)
+        return max([0, 1-alpha])
+
+    def compare_ks_old(self, other):
+        # Kolmogorov-Smirnov Statistic
+        testRanges = 10
+        minVal1 = self.minVal()
+        minVal2 = other.minVal()
+        maxVal1 = self.maxVal()
+        maxVal2 = other.maxVal()
+        minVal = min([minVal1, minVal2])
+        maxVal = max([maxVal1, maxVal2])
+        #print('minVal, maxVal = ', minVal, maxVal)
+        ranges = list(np.arange(minVal, maxVal + .00001, (maxVal - minVal) / float(testRanges)))
+        #print('ranges =', len(ranges), ranges)
+        N1 = self.N
+        N2 = other.N
+        cdf1 = 0.0
+        cdf2 = 0.0
+        diffs = []
+        for i in range(testRanges):
+            r1 = ranges[i]
+            r2 = ranges[i+1]
+            p1 = self.P((r1, r2))
+            p2 = other.P((r1,r2))
+            cdf1 += p1
+            cdf2 += p2
+            #if p1 > 0 and p2 > 0:
+            diff = abs(cdf1 - cdf2)
+            diffs.append(diff)
+        ks = max(diffs)
+        # Normalize the ks statistic based on the number of data points
+        # and the desired threshold (i.e. ksThreshold).
+        # The .5 multiplier normalizes to .5 rather than to 1.0 as the final
+        # threshold.
+        normKS = ks / (self.ksThreshold * sqrt((N1 + N2) / (N1 * N2))) * .5
+        return normKS
+
 
     def isNull(self):
         for val in self.ToHistogram():

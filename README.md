@@ -30,7 +30,7 @@ _Probability/Prob.py_ provides a powerful Multivariate Probability Space object 
 - P(Y=y | X=x) -- The numerical probability that Y takes on the value y, given that X is observed to have the value x.
 - P(Y=y | X=x, ... , Z=z) -- The numerical probability that Y takes on the value y, given the values of multiple variables.
 - P(Y=y | X) -- The numerical probability that Y=y when conditionalized on X.  This is equivalent to the sum of P(Y=y | X=x) * P(X=x), for every value x of X.
-P(Y=y | X=x, Z) -- The numerical probability that Y=y,  given that X=x and conditionalized on Z. There may be additional givens, and multiple variables may be conditionalized on.
+- P(Y=y | X=x, Z) -- The numerical probability that Y=y,  given that X=x and conditionalized on Z. There may be additional givens, and multiple variables may be conditionalized on.
 
 ### Probability Distributions and Conditional Probability Distributions
 - P(X) -- The probability distribution of any variable X.  Presented as a PDF (Probability Distribution Function), which is actually a discretized version of the probability distribution.
@@ -48,7 +48,7 @@ Rapid Dependence and Independence testing is provided using hierarchical stochas
 - Independence(X, Y | Z=z, W) -- All the flavors of conditional independence, as with dependence (above), but inverted.
 - isIndependent(X, Y | Z=z, W) -- All flavors of conditional independence. returns Boolean, True if independent, otherwise False.
 ### Prediction and Classification
-This is similar to a Machine Learning system, except that there is no training.  All predictions are done at query time rather than using a training process.  It can handle any type of dependent and independent variables (binary, categorical, continuous) and can handle any type of relationships among data elements (linear, non-linear, continuous, discontinuous), making it more flexible than most ML methods.  It is also very easy to use because there is no need to encode or standardize data, and no assumptions are made regarding the relationships disturbances.  Generalization is handled via progressive filtering.
+This is similar to a Machine Learning system, except that there is no training.  All predictions are done at query time rather than using a training process.  It can handle any type of dependent and independent variables (binary, categorical, continuous) and can handle any type of relationships among data elements (linear, non-linear, continuous, discontinuous), making it more flexible than most ML methods.  It is also very easy to use because there is no need to encode or standardize data, and no assumptions are made regarding the relationships or disturbances.  Generalization is handled via progressive filtering.
 - PredictDist(Y | X1=x1, X2=x2, ... , XN=xN) -- Returns the distribution (see PDF below) of a dependent variable (Y) given any number of independent variables (X) and their values. 
 - Predict(Y | X1=x1, X2=x2, ... , XN=xN) -- Perfoms a non-linear regression operation, providing a best estimate of the dependent variable (Y) given any number of
     independent variables and their values.

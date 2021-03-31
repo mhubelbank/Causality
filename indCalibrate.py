@@ -10,8 +10,8 @@ import time
 
 METHOD = 'prob'
 #METHOD = 'fcit'
-POWER = 1
-
+POWER = 3
+print('power = ', POWER)
 args = sys.argv
 test = 'Probability/Test/models/indCalibrationDat.csv'
 
@@ -21,7 +21,7 @@ vars = dat.keys()
 for var in vars:
     dat[var] = standardize(dat[var])
 #print('dat = ', dat)
-ps = Prob.ProbSpace(dat, power = 1, density = 1)
+ps = Prob.ProbSpace(dat, power = POWER)
 
 # List a variety of independent relationships
 indeps = [('L1', 'L2'),
@@ -37,6 +37,7 @@ indeps = [('L1', 'L2'),
             ('C', 'E2'),
             ('L6', 'L7', ['L3']),
             ('L4', 'L6', ['L3']),
+            ('L8', 'L9', ['L1']),
             ('M1', 'E2'),
             ('M1', 'E2'),
             ]
@@ -50,30 +51,27 @@ deps = [('L3', 'L4'),
         ('E3', 'E1'),
         ('E3', 'E2'),
         ('M1', 'N2'),
+        ('B', 'D'),
+        ('B', 'D', 'C'),
         ('B', 'D', ['A', 'C']),
         ('B', 'A', 'C'),
         ('B', 'A', ['C', 'D']),
-        ('C', 'B', 'A'),
+        ('B', 'C', 'A'),
+        ('A', 'C', 'B'),
+        ('L8', 'L9'),
         ('N1', 'N2', ['N3']),
         ('N3', 'E1', ['M1']),
         ]
 print('Testing: ', test)
 start = time.time()
-minDep = ps.dependence('B', 'A', ['C', 'D'])
-maxDep = ps.dependence('L5', 'L2')
-maxIndep = ps.dependence('A', 'C', ['B', 'D'])
-# Dependence Threshold Analysis
-print('minDep = ', minDep)
-print('maxDep = ', maxDep)
-print('maxIndp = ', maxIndep)
-print('Best Low Threshold = ', (minDep + maxIndep)/2)
-print('Best High Threshold = ', maxDep + .01)
+
 testVal = 0
 condTestVal = 0
 delta = .1
 
 minIndep = 999999.0
 maxDep = 0.0
+minDep = 9999999.0
 cumIndep = 0.0
 cumDep = 0.0
 print()
@@ -93,7 +91,7 @@ for ind in indeps:
     #pval = ps.independence(x, y, z)
     if pval < minIndep:
         minIndep = pval
-    print('independence', ind, '= ', pval)
+    print('dependence', ind, '= ', 1-pval)
 
 print()
 print('Testing expected dependents:')
@@ -113,12 +111,17 @@ for dep in deps:
     #pval = ps.independence(x, y, z)
     if pval > maxDep:
         maxDep = pval
-    print('independence', dep, ' = ', pval)
+    if pval < minDep:
+        minDep = pval
+    print('dependence', dep, ' = ', 1-pval)
 print()
-print('Minimum value for expected independents = ', minIndep)
-print('Maximum value for expected dependents =', maxDep)
+
+print('Maximum dependence for expected independents = ', 1-minIndep)
+print('Minimum dependence for expected dependents =', 1- maxDep)
 print('Margin = ', minIndep - maxDep, '.  Positive margin is good.')
-print('best threshold is: ', (minIndep + maxDep) / 2.0)
+print('Maximum dependence = ', 1-minDep)
+print('best Low threshold is: ', max([((1-minIndep) + (1- maxDep)) / 2.0, 1-minIndep + .001]))
+print('best High threshold is: ', 1 - minDep + .1)
 print()
 end = time.time()
 duration = end - start

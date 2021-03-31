@@ -26,16 +26,18 @@ model =    [
             ('L5', []),
             ('L6', []),
             ('L7', []),
+            ('L8', []),
+            ('L9', []),
             ('E3', []),
             ('N3', []),
+            ('N4', []),
+            ('N5', []),
             ('M1', []),
-
             ('B', []),
 			('A' , ['B']),
             ('D', ['A']),
 			('C', ['B', 'D']),
 			] 
-
 # Structural Equation Model for data generation
 varEquations = [
                 #'B = choice(range(-bRange, bRange+1))',
@@ -52,8 +54,12 @@ varEquations = [
                 'L5 = abs(L2)**2 + logistic(0,.1)',
                 'L6 = .5 * L3 + logistic(0,.1)',
                 'L7 = 1 * L3 + logistic(0, .1)',
+                'L8 = 1 * L1 + logistic(0, 1)',
+                'L9 = 1 * L1 + logistic(0, 1)',
                 'E3 = E1 + .5 * E2 + logistic(0,.1)',
                 'N3 = N1 + N2 + exponential()',
+                'N4 = N1 + normal(0, .1)',
+                'N5 = N1 + normal(0, .1)',
                 'M1 = N3 + E1 + normal(0,.1)',
 
                 # Model M3 with subtle conditional independencies

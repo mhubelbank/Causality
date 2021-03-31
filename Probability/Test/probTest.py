@@ -16,9 +16,19 @@ def run(filename):
     r = getData.DataReader(filename)
     dat = r.read()
     ps = ProbSpace(dat, density=1, power=1)
-
     start = time.time()
     print()
+
+    print('Testing continuous causal dependence:')
+    print('IVB _||_ IVA = ', ps.dependence('IVB', 'IVA'), ' Exp: > .5')
+    print('IVA _||_ IVB = ', ps.dependence('IVA', 'IVB'), ' Exp: > .5')
+    print('IVB _||_ IVC = ', ps.dependence('IVB', 'IVC'), ' Exp: > .5')
+    print('IVA _||_ IVC = ', ps.dependence('IVA', 'IVC'), ' Exp: > .5')
+    print('IVA _||_ IVC | IVB = ', ps.dependence('IVA', 'IVC', 'IVB'), ' Exp: < .5')
+    print('IVA _||_ IVC | IVB, N = ', ps.dependence('IVA', 'IVC', ['IVB', 'N']), ' Exp: < .5')
+    print()
+    5/0
+
     print ('Testing probability module.')
     print()
     print('Testing basic statistics for various types of distribution:)')

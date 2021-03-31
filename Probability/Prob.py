@@ -67,6 +67,9 @@ class ProbSpace:
             npDat.append(ds[field])
         self.aData = np.array(npDat)
         self.N = self.aData.shape[1]
+        if self.N == 0:
+            print('ProbSpace.__init__: Empty Probability Space.')
+            return
         self.probCache = {} # Probability cache
         self.distrCache = {} # Distribution cache
         self.fieldAggs = self.getAgg(ds)
@@ -76,6 +79,11 @@ class ProbSpace:
         else:
             self.discSpecs = self.calcDiscSpecs()
             self.discretized = self.discretize()
+        # For SubSpaces only
+        # parentProb is the probability of the subspace within the parent space
+        self.parentProb = None
+        # Parent Query is the query on the parents space that resulted in the subspace.
+        self.parentQuery = None
 
     def getAgg(self, ds):
         fieldList = list(ds.keys())
@@ -171,81 +179,148 @@ class ProbSpace:
         bucketCount = dSpec[0]
         return range(bucketCount)
 
-    def filteredSpace(self, filtSpec, power=None, density=None, discSpecs=None):
-        """ Return a new ProbSpace object with just the data that passes the filter.
+    def SubSpace(self, givensSpec, minValues=None, maxValues=None, power=None,
+                        density=None, discSpecs=None):
+        """ Return a new ProbSpace object representing a sub-space of the current
+            probability space.
             The returned object represents the multivariate joint probability space
-            of the filtered data.
+            of the original space given a set of conditions.
+            That is: P(<all variables> | givensSpec).
+            The data is filtered by the givensSpec, and the resulting conditional
+            distribution is returned.
+            For discrete variables, or filters specified as (varName, high, low),
+            exact filtering is done.
+            For continuous variables specified as (varName, value), progressive
+            filtering is used.  Since the probability of any continuous value is
+            zero, the specification (varName, value) is converted to a small
+            range (varName, value - delta, value + delta).  This range is iteratively
+            adjusted so that a "reasonable" number of data points.  By default,
+            that "reasonable" number is between 100 and 1000 data points -- enough
+            to produce a reliably measurable distribution.   IF desired, different
+            limits can be provided using the minValues and maxValues parameters.
+            For example, by using minValues = 1, and maxValues = 10, one could
+            request a small number of samples that are the closest to the requested
+            values.  Note that sample counts cannot be managed exactly, so it is
+            possible to receieve sample counts smaller or greater than the requested
+            range.
         """
         if power is None:
             power = self.power
         if density is None:
             density = self.density
         #print('filtSpec = ', filtSpec)
-        filtDat = self.filter(filtSpec)
+        filtDat, parentProb, finalQuery = self.filter(givensSpec, minValues=minValues, maxValues=maxValues)
         newPS = ProbSpace(filtDat, power = power, density = density, discSpecs = discSpecs)
+        newPS.parentProb = parentProb
+        newPS.parentQuery = finalQuery
         return newPS
 
-    def filter(self, filtSpec):
+    def filter(self, filtSpec, minValues=None, maxValues=None):
         """ Filter the data based on a set of filterspecs: [filtSpec, ...]
             filtSpec := (varName, value) or (varName, lowValue, highValue)
             Returns a data set in the original {varName:[varData], ...}
             dictionary format.
+            See FilteredSpace documentation (above) for details.
         """
-        filtdata = self.filterDat(filtSpec)
+        filtdata, parentProb, finalQuery = self.filterDat(filtSpec, minValues, maxValues)
         # Now convert to orginal format, with only records that passed filter
         outData = self.toOriginalForm(filtdata)
-        return outData
+        return outData, parentProb, finalQuery
 
-    def filterDat(self, filtSpec, adat = None):
+    def filterDat(self, filtSpec, minValues=None, maxValues=None, adat = None):
         """ Filter the data in its array form and return a filtered array.
+            See FilteredSpace documentation (above) for details.
         """
+        #print('in filterDat.  filtSpec = ', filtSpec)
+        maxAttempts = 8
+        delta = .1
+        minValues_default = max([min([100, sqrt(self.N)]), 20])
+        maxValues_default = max([min([1000, int(self.N / 2)]), minValues_default * 5])
+        if minValues is None:
+            minValues = minValues_default
+        if maxValues is None:
+            maxValues = maxValues_default
         if adat is None:
             adat = self.aData
-        # Transform filtSpecs from (varName, value) to (varIndex, value) or for
-        # continuous variables: (varIndex, low, high)
-        filtSpec2 = []
+        
+        # Determine if we are doing progressive filtering on at least one variable
+        progressive = False
         for filt in filtSpec:
             if len(filt) == 2:
                 var, val = filt
-                indx = self.fieldIndex[var]
-                dSpec = self.discSpecs[indx]
-                filtSpec2.append((indx, val))
-            else:
-                field, low, high = filt
-                indx = self.fieldIndex[field]
-                dSpec = self.discSpecs[indx]
-                edges = list(dSpec[3])
-                varMin = dSpec[1]
-                varMax = dSpec[2]
-                if low is None:
-                    low = varMin
-                if high is None:
-                    high = varMax
-                filtSpec2.append((indx, low, high))
-
-        remRecs = []
-        for i in range(self.N):
-            include = True
-            for filt in filtSpec2:
-                if len(filt) == 2:
-                    fieldInd, targetVal = filt
-                    if type(targetVal) == type((0,)):
-                        targetVal = val[0]
-                    val = adat[fieldInd, i]
-                    if val != targetVal:
-                        include = False
-                        break
+                if not self.isDiscrete(var):
+                    progressive = True
+                    break
+        if progressive:
+            attempts = maxAttempts
+        else:
+            attempts = 1
+        for attempt in range(attempts):
+            # Fix up progressively filtered specs (i.e. non discrete, 2-tuples)
+            # to filter on value - delte to value + delta
+            filtSpec2 = []
+            for filt in filtSpec:
+                var = filt[0]
+                if self.isDiscrete(var) or len(filt) == 3:
+                    filtSpec2.append(filt)
                 else:
-                    fieldInd, low, high = filt
-                    val = adat[fieldInd, i]
-                    if val < low or val >= high:
-                        include = False
-                        break
-            if not include:
-                remRecs.append(i)
+                    # Progressive var
+                    val = filt[1]
+                    aggs = self.fieldAggs[var]  # Field aggregates
+                    std = aggs[3] # Standard deviation
+                    sDelta = delta * std # Scaled delta
+                    filtSpec2.append((var, val - sDelta, val + sDelta))
+            #print('filtSpec2 = ', filtSpec2)
+            remRecs = []
+            for i in range(self.N):
+                include = True
+                for filt in filtSpec2:
+                    if len(filt) == 2:
+                        var, targetVal = filt
+                        if type(targetVal) == type((0,)):
+                            targetVal = val[0]
+                        fieldInd = self.fieldIndex[var]
+                        val = adat[fieldInd, i]
+                        if val != targetVal:
+                            include = False
+                            break
+                    else:
+                        var, low, high = filt
+                        fieldInd = self.fieldIndex[var]
+                        dSpec = self.discSpecs[fieldInd]
+                        varMin = dSpec[1]
+                        varMax = dSpec[2]
+                        if low is None:
+                            low = varMin
+                        if high is None:
+                            high = varMax
+                        val = adat[fieldInd, i]
+                        if val < low or val >= high:
+                            include = False
+                            break
+                if not include:
+                    remRecs.append(i)
+            remaining = self.N - len(remRecs)
+            targetVal = maxValues * .9
+            if remaining == 0:
+                delta *= 5
+            elif remaining < minValues:
+                delta *= min([targetVal / float(remaining), 1 + 1.2 / ((attempt+1)**.5)])
+            elif remaining > maxValues:
+                delta *= max([targetVal / float(remaining), 1 - .5 / ((attempt+1)**.5)])
+            else:
+                break
+        if progressive:
+            #print('attempt = ', attempt, ', delta = ', delta, ', remaining = ', remaining, ', minVal, maxVal = ', minValues, maxValues)
+            #print('finalQuery = ', filtSpec2, ', parentProb = ', remaining/self.N, ', parentN = ', self.N)
+            pass
         # Remove all the non included rows
         filtered = np.delete(adat, remRecs, 1)
-        return filtered
+        #print('filtered.shape = ', filtered.shape)
+        finalQuery = filtSpec2
+        parentProb = filtered.shape[1] / float(self.N)
+        return filtered, parentProb, finalQuery
+        # End of filterDat
 
     def binToVal(self, field, bin):
         indx = self.fieldIndex[field]
@@ -387,8 +462,10 @@ class ProbSpace:
             For example:
             - P(Y | X=1, Z) is: sum over all (Z=z) values( P(Y | X=1, Z=z) * P(Z=z))
         """
+        DISC_DISTS = True # If False, use full data for distributions.  Otherwise use binned data.
+                          # Will be much slower and slightly more accurate if False.
         if DEBUG:
-            print('Prob.Sample: P(' , rvName, '|', givenSpecs , ')')
+            print('ProbSpace.distr: P(' , rvName, '|', givenSpecs , ')')
         if power is None:
             power = self.power
         if givenSpecs is None:
@@ -424,21 +501,33 @@ class ProbSpace:
                 start = edges[i]
                 end = edges[i+1]
                 pdfSpec.append((i, start, end, outHist[i]))
-            outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete)
+            if not DISC_DISTS:
+                dat = self.aData[indx,:]
+            else:
+                dat = None
+            outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete, data=dat)
             self.distrCache[cacheKey] = outPDF
             return outPDF
         else:
             # Conditional Probability
             condSpecs, filtSpecs = self.separateSpecs(givenSpecs)
+            #print('filtSpecs = ', filtSpecs)
             if filtSpecs:
                 # Create a new probability object based on the filtered data
-                filtSpace = self.filteredSpace(filtSpecs, density = self.density, power = self.power, discSpecs=self.discSpecs)
+                if condSpecs:
+                    filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, discSpecs=self.discSpecs)
+                else:
+                    filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power)
             else:
                 filtSpace = self
             if not condSpecs:
                 # Nothing to conditionalize on.  We can just return the selected variable
                 # from the filtered distribution
-                outPDF = filtSpace.distr(rvName)
+                if not DISC_DISTS:
+                    dat = filtSpace.aData[indx, :]
+                else:
+                    dat = None
+                outPDF = filtSpace.distr(rvName, data=dat)
             else:
                 # Conditionalize on all indicated variables. I.e.,
                 # SUM(P(filteredY | Z=z) * P(Z=z)) for all z in Z.
@@ -451,20 +540,29 @@ class ProbSpace:
                 #countRatio = float(self.N) / filtSample.N
                 allProbs = 0.0 # The fraction of the probability space that has been tested.
                 for cf in condFiltSpecs:
-                    probZ = self.jointProb(cf) # P(Z=z)
+                    # Create a new subspace filtered by both the bound and unbound conditions
+                    # Note that progressive filtering will be used for the unbound conditions.
+                    #print('filtSpace.N = ', filtSpace.N, ', cf = ', cf)
+                    #ss = filtSpace.SubSpace(cf, density = self.density, power = self.power, discSpecs=self.discSpecs)
+                    # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
+                    probYgZ = filtSpace.distr(rvName, cf)
+                    #probYgZ = ss.distr(rvName)
+                    # Due to progressive filtering, we need to get the actual final filter used in producing ss
+                    #finalFilter = ss.parentQuery
+                    # Now we can compute probZ as the probability of the finalFilter in the main distribution
+                    probZ = probYgZ.N / self.N
+                    #print('probZ = ', probZ, ', probYgZ/E() = ', probYgZ.E())
+                    #probZ = self.jointProb(finalFilter) # P(Z=z)
                     if probZ == 0:
                         #print('probZ = 0')
                         # Zero probability -- don't bother accumulating
                         continue
-                    # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
-                    probYgZ = filtSpace.distr(rvName, cf)
-                    if probYgZ:
-                        probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
-                        accum += probs
+                    probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
+                    accum += probs
                     allProbs += probZ
                     #print('distr: cf = ', cf, ', probs = ', probYgZ.stats(), ', probZ = ', probZ)
                 accum = accum / allProbs
-                N = self.distr(rvName, filtSpecs).N
+                N = filtSpace.N
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
                 # original bin structure. 
@@ -481,9 +579,28 @@ class ProbSpace:
 
     PD = distr
 
-    def getCondSpecs(self, condVars, power=2, deltaAdjust=1):
-        rawCS = self.getCondSpecs2(condVars, power = power, deltaAdjust = deltaAdjust)
-        #print('rawCS = ', rawCS)
+    def getCondSpecs(self, condVars, power=2):
+        """ Produce a set of conditional specifications for stochastic
+            conditionalization, given
+            a set of variables to conditionalize on, and a desired power level.
+            Power determines how many points to use to conditionalize on.
+            Zero indicates conditionalize on the mean alone. 1 uses the mean
+            and two other points (one on either side of the mean).
+            2 Uses the mean plus 4 other points (2 on each side of the mean).
+            Power values (p) less than 100 will test p * 2 + 1 values for each
+            variable.range
+            power value > 100 indicates that all values will be tested,
+            which can be extremely processor intensive.
+            Conditional specifications provide a list of lists of tuple:
+            [[(varName1, value1_1), (varName2, value2_1), ... (varNameK, valueK_1)],
+             [(varName1, value1_2), (varName2, value2_2), ... (varNameK, valueK_2)],
+             ...
+             [(varName1, value1_N), (varName2, value2_N), ... (varNameK, valueK_N)]]
+            Where K is the number of conditional variables, and N is the total number
+            of combinations = K**(2 * P + 1) for values of P < 100.
+        """
+        rawCS = self.getCondSpecs2(condVars, power = power)
+        #print('rawCS = ', rawCS, ', power = ', power)
         outCS = []
         for spec in rawCS:
             #print('spec = ', spec)
@@ -498,46 +615,26 @@ class ProbSpace:
                 if self.isDiscrete(var):
                     outSpec.append(varSpec)
                 else:
-                    min, max = varSpec[1:]
+                    val = varSpec[1]
                     distr = currPS.distr(var)
                     mean = distr.E()
                     std = distr.stDev()
                     #print('mean, std = ', mean, std)
-                    varSpec = (var, mean + min * std, mean + max * std)
+                    varSpec = (var, mean + val * std)
+                    #print('varSpec = ', varSpec, ', val = ', val, ', mean, std = ', mean, std)
                     outSpec.append(varSpec)
                 # Use resulting conditional space of this variable for the sample
                 # of the next one.  That way, we sample using the mean and std
-                # of the variable in the conditionaed space of the previous vars.
+                # of the variable in the conditioned space of the previous vars.
                 if s != len(spec) - 1:
-                    currPS = currPS.filteredSpace([varSpec])
+                    currPS = currPS.SubSpace([varSpec], maxValues=currPS.N)
             #print('outSpec = ', outSpec)
             outCS.append(outSpec)
         #print('outCS = ', outCS)
         return outCS
 
-    def getCondSpecs2(self, condVars, power=2, deltaAdjust=1):
-        """ Produce a set of conditional specifications for stochastic
-            conditionalization, given
-            a set of variables to conditionalize on, and a desired power level.
-            Power determines how many points to use to conditionalize on.
-            Zero indicates conditionalize on the mean alone. 1 uses the mean
-            and two other points (one on either side of the mean).
-            2 Uses the mean plus 4 other points (2 on each side of the mean).
-            Power values (p) less than 100 will test p * 2 + 1 values for each
-            variable.range
-            power value > 100 indicates that all values will be tested,
-            which can be extremely processor intensive.
-            Conditional specifications provide a list of lists of tuple:
-            [[(varName1, value1_1), (varName2, value2_1), ... (varNameK, valueK_1)],
-             [(varName1, value1_2), (varName2, value2_2), ... (varNameK, valueK_2)],
-             ...
-             [(varName1, value1_N), (varName2, value2_N), ... (varNameK, valueK_N)]]
-            Where K is the number of conditional variables, and N is the total number
-            of combinations = K**(2 * P + 1) for values of P < 100.
-            """
-        def getTestVals(self, rv, deltaAdjust):
-            deltaBase = .05
-            delta = deltaBase * deltaAdjust
+    def getCondSpecs2(self, condVars, power=2):
+        def getTestVals(self, rv):
             isDiscrete = self.isDiscrete(rvName)
             if isDiscrete or testPoints is None:
                 # If is Discrete, return all values
@@ -549,18 +646,18 @@ class ProbSpace:
                 for tp in testPoints:
                     if tp == 0:
                         # For 0, just use the mean
-                        testVals.append((- delta, + delta))
+                        testVals.append(0)
                     else:
                         # For nonzero, test points mean + tp and mean - tp
-                        testVals.append((-tp - delta, -tp + delta))
-                        testVals.append((tp - delta, tp + delta))
+                        testVals.append(-tp,)
+                        testVals.append(tp,)
             return testVals
-        levelSpecs0 = [.5, .75, .25, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
+        levelSpecs0 = [1, .25, .5, .75, .25, .1, 1.5, 1.25, 1.75, 2.0]
         maxLevel = 3 # Largest standard deviation to sample
         if power <= 10:
             levelSpecs = levelSpecs0
         elif power < 100:
-            levelSpecs = np.range(1/power, maxLevel + 1/power, 1/power)
+            levelSpecs = list(np.arange(1/power, maxLevel + 1/power, 1/power))
         else:
             levelSpecs = None
         if levelSpecs:
@@ -574,103 +671,19 @@ class ProbSpace:
         rvName = condVars[0]
         if nVars == 1:
             # Only one var to do.  Find the values.
-            vals = getTestVals(self, rvName, deltaAdjust=deltaAdjust)
-            if self.isDiscrete(rvName):
-                return [[(rvName, val)] for val in vals]
-            else:
-                return [[((rvName,) + val)] for val in vals]
+            vals = getTestVals(self, rvName)
+            return [[(rvName, val)] for val in vals]
         else:
             # We're not on the last var, so recurse and build up the total set
             accum = []
-            vals = getTestVals(self, rvName, deltaAdjust=deltaAdjust)
-            childVals = self.getCondSpecs(condVars[1:], power) # Recurse to get the child values
+            vals = getTestVals(self, rvName)
+            nextPower = power if power <= 1 else power -1
+            childVals = self.getCondSpecs2(condVars[1:], nextPower) # Recurse to get the child values
             for val in vals:
-                if self.isDiscrete(rvName):
-                    accum += [[(rvName, val)] + childVal for childVal in childVals]
-                else:
-                    accum += [[(rvName,) + val] + childVal for childVal in childVals]
+                accum += [[(rvName, val)] + childVal for childVal in childVals]
             return accum
         # End of getCondSpecs
         
-    def getCondSpecs_orig(self, condVars, power=2, deltaAdjust=1):
-        """ Produce a set of conditional specifications for stochastic
-            conditionalization, given
-            a set of variables to conditionalize on, and a desired power level.
-            Power determines how many points to use to conditionalize on.
-            Zero indicates conditionalize on the mean alone. 1 uses the mean
-            and two other points (one on either side of the mean).
-            2 Uses the mean plus 4 other points (2 on each side of the mean).
-            Power values (p) less than 100 will test p * 2 + 1 values for each
-            variable.range
-            power value > 100 indicates that all values will be tested,
-            which can be extremely processor intensive.
-            Conditional specifications provide a list of lists of tuple:
-            [[(varName1, value1_1), (varName2, value2_1), ... (varNameK, valueK_1)],
-             [(varName1, value1_2), (varName2, value2_2), ... (varNameK, valueK_2)],
-             ...
-             [(varName1, value1_N), (varName2, value2_N), ... (varNameK, valueK_N)]]
-            Where K is the number of conditional variables, and N is the total number
-            of combinations = K**(2 * P + 1) for values of P < 100.
-            """
-        def getTestVals(self, rv, deltaAdjust):
-            deltaBase = .05
-            delta = deltaBase * deltaAdjust
-            isDiscrete = self.isDiscrete(rvName)
-            if isDiscrete or testPoints is None:
-                # If is Discrete, return all values
-                testVals = self.getMidpoints(rv)
-                testVals = [(testVal,) for testVal in testVals]
-            else:
-                # If continuous, sample values at testPoint distances from the mean
-                testVals = []
-                p = self.distr(rv)
-                mean = p.E()
-                std = p.stDev()
-                for tp in testPoints:
-                    if tp == 0:
-                        # For 0, just use the mean
-                        testVals.append((mean - delta * std, mean + delta * std))
-                    else:
-                        # For nonzero, test points mean + tp and mean - tp
-                        testVals.append((mean - tp * std - delta * std, mean - tp * std + delta * std))
-                        testVals.append((mean + tp * std - delta * std, mean + tp * std + delta * std))
-            return testVals
-        levelSpecs0 = [.5, .75, .25, 1.0, 1.5, .25, .75, 1.25, 1.75, 2.0]
-        maxLevel = 3 # Largest standard deviation to sample
-        if power <= 10:
-            levelSpecs = levelSpecs0
-        elif power < 100:
-            levelSpecs = np.range(1/power, maxLevel + 1/power, 1/power)
-        else:
-            levelSpecs = None
-        if levelSpecs:
-            testPoints = [0] + levelSpecs[:power]
-        else:
-            # TestPoints None means test all values
-            testPoints = None
-
-        # Find values for each variable based on testPoints
-        nVars = len(condVars)
-        rvName = condVars[0]
-        if nVars == 1:
-            # Only one var to do.  Find the values.
-            vals = getTestVals(self, rvName, deltaAdjust=deltaAdjust)
-            if self.isDiscrete(rvName):
-                return [[(rvName, val)] for val in vals]
-            else:
-                return [[((rvName,) + val)] for val in vals]
-        else:
-            # We're not on the last var, so recurse and build up the total set
-            accum = []
-            vals = getTestVals(self, rvName, deltaAdjust=deltaAdjust)
-            childVals = self.getCondSpecs(condVars[1:], power) # Recurse to get the child values
-            for val in vals:
-                if self.isDiscrete(rvName):
-                    accum += [[(rvName, val)] + childVal for childVal in childVals]
-                else:
-                    accum += [[(rvName,) + val] + childVal for childVal in childVals]
-            return accum
-        # End of getCondSpecs_orig
 
     def adjustSpec(self, spec, delta):
         outSpec = []
@@ -689,120 +702,6 @@ class ProbSpace:
         #print('old = ', spec, ', new =', outSpec, ', delta = ', deltaAdjust)
         return outSpec
 
-    def dependence_new(self, rv1, rv2, givensSpec=[], power = None):
-        """ givens is [given1, given2, ... , givenN]
-        """
-        if power is None:
-            power = self.power
-        if givensSpec is None:
-            givensSpec = []
-        if type(givensSpec) != type([]):
-            givensSpec = [givensSpec]
-        maxAttempts = 5
-        minVals = 100
-        maxVals = int(self.N**.5) * 5
-        accum = 0.0
-        accumProb = 0.0
-        # Get all the combinations of rv1, rv2, and any givens
-        # Depending on power, we test more combinations.  If level >= 100, we test all combos
-        # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
-        # For level = 3, we test the mean + 6 more values.
-
-        # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
-        givensU, givensB = self.separateSpecs(givensSpec)
-        condFiltSpecs = self.getCondSpecs(givensU + [rv2], power)
-        prevGivens = None
-        prevProb1 = None
-        numTests = 0
-        for spec in condFiltSpecs:
-            # Compare P(Y | Z) with P(Y | X,Z)
-            # givens is conditional on spec without rv2
-            #print('spec = ', spec)
-            deltaAdjust = 1.0
-            for attempt in range(maxAttempts):
-                givens = spec[:-1]
-                if givens != prevGivens:
-                    # Only recompute prob 1 when givensValues change
-                    if givens:
-                        prob1 = self.distr(rv1, givens + givensB)
-                    else:
-                        prob1 = self.distr(rv1, givensB)
-                    testRanges0 = self.getCondSpecs([rv1], power=4)
-                    testRanges = [tv[0][1:] for tv in testRanges0]
-                    prevProb1 = prob1
-                    prevGivens = givens
-                else:
-                    # Otherwise use the previously computed prob1
-                    prob1 = prevProb1
-                prob2 = self.distr(rv1, spec + givensB)
-                #print('prob1.E() = ', prob1.E(), prob1.stDev(), prob1.N)
-                #print('prob2.E() = ', prob2.E(), prob2.stDev(), prob2.N)
-                #print('prob2.N = ', prob2.N)
-                N = prob2.N
-                oldDa = deltaAdjust
-                #print('Attempt = ', attempt + 1, N, maxVals, ', spec = ', spec, ', deltaAdj = ', deltaAdjust)
-                if attempt != maxAttempts - 1 and (N < minVals or N > maxVals):
-                    if N == 0:
-                        deltaAdjust *= 5
-                    elif N < minVals:
-                        deltaAdjust *= min([minVals * 1.1 / float(N), 2.2])
-                    else:
-                        # N > maxVals
-                        deltaAdjust *= max([maxVals * .9 / float(N), .5])
-                    spec = self.adjustSpec(spec, deltaAdjust / oldDa)
-                    #print('Too few datapoints for: ', spec, prob1.N, prob2.N)
-                    continue
-                else:
-                    break
-            deps = []
-            testsComplete = 0
-            allProbs = 0.0
-            if not self.isDiscrete(rv1):
-                for testRange in testRanges:
-                    p2Test = prob2.P(testRange)
-                    #if p2Test == 0:
-                    #    continue
-                    p1Test = prob1.P(testRange)
-                    err = ((p1Test - p2Test)**2 / (p1Test + p2Test) * 2 * p1Test) if p1Test + p2Test > 0 else 0.0
-                    #err = (p1Test - p2Test)**2
-                    #print('p1Test = ', p1Test, ', p2Test = ', p2Test, ', err = ', err)
-                    allProbs += p1Test
-                    testsComplete += 1
-                    deps.append(err)
-                # Rescale deps by the total probability measured
-                #print('deps = ', deps)
-                if allProbs > 0:
-                    deps = [dep / allProbs for dep in deps]
-            else:
-                err = prob1.compare(prob2)
-                deps.append(err)
-            #dep = max(deps)
-            dep = sum(deps)
-            #print('dep = ', dep)
-            # We accumulate any measured dependency multiplied by the probability of the conditional
-            # clause.  This way, we weight the dependency by the frequency of the event.
-            condProb = self.jointProb(spec)
-            accum += dep * condProb
-            accumProb += condProb # The total probability space assessed
-            numTests += 1
-            if DEBUG:
-                print('spec = ', spec, ', givensB = ', givensB, ', dep = ', deps, prob2.N)
-        if accumProb > 0.0:
-            # Normalize the results for the probability space sampled by dividing by accumProb
-            dependence = accum / accumProb
-            return dependence
-            H = 0.03
-            L = 0.001
-            if dependence < L:
-                calDep = dependence / (2*L)
-            else:
-                calDep = (dependence - L) / (H-L) / 2 + .5
-            #return dependence * (.5 / 0.000128)
-            return calDep
-
-        print('Cond distr too small: ', rv1, rv2, givens)
-        return 0.0
-
     def dependence(self, rv1, rv2, givensSpec=[], power = None):
         """ givens is [given1, given2, ... , givenN]
         """
@@ -812,9 +711,6 @@ class ProbSpace:
             givensSpec = []
         if type(givensSpec) != type([]):
             givensSpec = [givensSpec]
-        maxAttempts = 8
-        minVals = 100
-        maxVals = int(self.N**.5) * 5
         accum = 0.0
         accumProb = 0.0
         # Get all the combinations of rv1, rv2, and any givens
@@ -824,112 +720,79 @@ class ProbSpace:
 
         # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
         givensU, givensB = self.separateSpecs(givensSpec)
-        condFiltSpecs = self.getCondSpecs(givensU + [rv2], power)
+        if not givensU:
+            condFiltSpecs = [None]
+        else:
+            condFiltSpecs = self.getCondSpecs(givensU, power)
         prevGivens = None
         prevProb1 = None
         numTests = 0
         for spec in condFiltSpecs:
-            allDiscrete = True
-            for varSpec in spec:
-                var = varSpec[0]
-                if not self.isDiscrete(var):
-                    allDiscrete = False
-                    break
             # Compare P(Y | Z) with P(Y | X,Z)
             # givens is conditional on spec without rv2
             #print('spec = ', spec)
-            deltaAdjust = 1.0
-            if allDiscrete:
-                attempts = 1
+            if spec is None: # Unconditional Independence
+                ss1 = self
+                prob1 = self.distr(rv1)
             else:
-                attempts = maxAttempts
-            for attempt in range(attempts):
-                givens = spec[:-1]
+                givens = spec
                 if givens != prevGivens:
                     # Only recompute prob 1 when givensValues change
-                    if givens:
-                        prob1 = self.distr(rv1, givens + givensB)
-                    else:
-                        prob1 = self.distr(rv1, givensB)
+                    # Get a subsapce filtered by all givens, but not rv2
+                    #ss1 = self.SubSpace(givens + givensB, minValues=1000, maxValues=self.N, discSpecs = self.discSpecs)
+                    #ss1 = self.SubSpace(givens + givensB, minValues=1000, maxValues=self.N)
+                    ss1 = self.SubSpace(givens + givensB)
+                    prob1 = ss1.distr(rv1)
                     prevProb1 = prob1
                     prevGivens = givens
                 else:
                     # Otherwise use the previously computed prob1
                     prob1 = prevProb1
-                prob2 = self.distr(rv1, spec + givensB)
-                N = prob2.N
-                oldDa = deltaAdjust
-                #print('Attempt = ', attempt + 1, N, maxVals, ', spec = ', spec, ', deltaAdj = ', deltaAdjust)
-                if attempt != attempts - 1 and (N < minVals or N > maxVals):
-                    if N == 0:
-                        deltaAdjust *= 5
-                    elif N < minVals:
-                        deltaAdjust *= min([minVals * 1.1 / float(N), 1 + 1.2 / ((attempt+1)**.5)])
-                    else:
-                        # N > maxVals
-                        deltaAdjust *= max([maxVals * .9 / float(N), 1 - .5 / ((attempt+1)**.5)])
-                    spec = self.adjustSpec(spec, deltaAdjust / oldDa)
-                    continue
-                else:
-                    break
-            deps = []
-            if prob2.N == 0:
+            if prob1.N == 0:
+                print('Empty distribution: ', spec)
                 continue
-            if not self.isDiscrete(rv1):
-                mean1 = prob1.E()
-                mean2 = prob2.E()
-                dep1 = abs((mean1 - mean2))
-                std1 = prob1.stDev()
-                std2 = prob2.stDev()
-                if std1 + std2 > 0:
-                    dep2 = abs((std1 - std2) / (std1 + std2))
-                    #dep2 = abs(std1 - std2)
-                else:
-                    dep2 = 0.0
-                sk1 = prob1.skew()
-                sk2 = prob2.skew()
-                ku1 = prob1.kurtosis()
-                ku2 = prob2.kurtosis()
-                dep3 = (sk1 - sk2)**2
-                dep4 = (ku1 - ku2)**2
-                dep3 = 0
-                dep4 = 0
-            else:
-                dep1 = prob1.compare(prob2)
-                #print('prob1.stats, prob2.stats = ', prob1.stats(), prob2.stats())
-                dep2 = dep3 = dep4 = 0.0
-            dep = max([dep1, dep2, dep3, dep4])
-            #print('dep = ', dep)
-            # We accumulate any measured dependency multiplied by the probability of the conditional
-            # clause.  This way, we weight the dependency by the frequency of the event.
-            condProb = self.jointProb(spec)
-            accum += dep * condProb
-            accumProb += condProb # The total probability space assessed
-            numTests += 1
-            if DEBUG:
-                print('spec = ', spec, ', givensB = ', givensB, ', dep = ', deps, prob2.N)
+            testSpecs = ss1.getCondSpecs([rv2], power)
+            for testSpec in testSpecs:
+                # prob2 is the conditional subspace of everything but rv2
+                # conditioned on rv2
+                #ss2 = ss1.SubSpace(testSpec, minValues = 100, maxValues = ss1.N, discSpecs = self.discSpecs)
+                #ss2 = ss1.SubSpace(testSpec, minValues = 100, maxValues = ss1.N)
+                ss2 = ss1.SubSpace(testSpec)
+                prob2 = ss2.distr(rv1)
+                if prob2.N == 0:
+                    continue
+                dep = prob1.compare(prob2)
+                # We accumulate any measured dependency multiplied by the probability of the conditional
+                # clause.  This way, we weight the dependency by the frequency of the event.
+                condProb = prob2.N / self.N
+                accum += dep * condProb
+                accumProb += condProb # The total probability space assessed
+                numTests += 1
+                if DEBUG:
+                    print('spec = ', spec, testSpec, ', givensB = ', givensB, ', dep = ', dep, ', prob1.N, prob2.N = ', prob1.N, prob2.N)
+                    print('ss1.parentQuery = ', ss1.parentQuery, ', ss2.parentQuery = ', ss2.parentQuery)
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
             dependence = accum / accumProb
-            #return dependence
-            H = .95
-            L = .05
-            if dependence < L:
-                calDep = dependence / (2*L)
-            else:
-                calDep = (dependence - L) / (H-L) / 2 + .5
-            #return dependence * (.5 / 0.000128)
-            return calDep
+        # Bound it to [0, 1] 
+        dependence = max([min([dependence, 1]), 0])
+        return dependence
+            #H = .36845
+            #L = .0272
+            #if dependence < L:
+            #    calDep = dependence / (2*L)
+            #else:
+            #    calDep = (dependence - L) / (H-L) / 2 + .5
+            # Bound it to [0, 1] 
+            #calDep = max([min([calDep, 1]), 0])
+            #return calDep
 
         print('Cond distr too small: ', rv1, rv2, givens)
         return 0.0
 
     def separateSpecs(self, specs):
         """ Separate bound and unbound variable specs,
-            and return (unboundSpecs, boundSpecs).  While we're
-            at it, fixup any exact value specs for continuous
-            variables to make a small range of std deviations
-            around the valeu.
+            and return (unboundSpecs, boundSpecs).  
         """
         delta = .05
         uSpecs = []
@@ -937,99 +800,13 @@ class ProbSpace:
         for spec in specs:
             if type(spec) == type((0,)):
                 # It is a bound spec
-                var = spec[0]
-                if len(spec) == 2 and not self.isDiscrete(var):
-                    # Continuous variable with a single value.  Change
-                    # to a fixed small range around that value.
-                    val = spec[1]
-                    std = self.distr(var).stDev()
-                    bSpecs.append((var, val - delta*std, val + delta*std))
-                else:
-                    bSpecs.append(spec)
+                bSpecs.append(spec)
             else:
                 # Unbound
                 uSpecs.append(spec)
         return uSpecs, bSpecs
 
-    def dependence_old(self, rv1, rv2, givensSpec=None, power=None):
-        """ Calculate the dependence between two random variables, optionally
-            given a set of bound or unbound other variables.
-        """
-        if power is None:
-            power = self.power
-        if givensSpec is None:
-            givensSpec = []
-        if type(givensSpec) != type([]):
-            givensSpec = [givensSpec]
-        # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
-        givensU, givensB = self.separateSpecs(givensSpec)
-        accum = 0.0
-        accumProb = 0.0
-        # Get all the combinations of rv1, rv2, and any givens
-        # Depending on level, we test more combinations.  If level >= 100, we test all combos
-        # For level = 0, we just test the mean.  For 1, we test the mean + 2 more values.
-        # For level = 3, we test the mean + 6 more values.
-        condFiltSpecs = self.getCondSpecs(givensU + [rv2], power)
-        prevGivens = None
-        prevProb1 = None
-        numTests = 0
-        for spec in condFiltSpecs:
-            # spec is rv2 + any other unbound conditions to test.
-            # Compare P(Y | Z) with P(Y | X,Z)
-            # givens is all unbound conditions without rv2 (i.e. X)
-            givens = spec[:-1]
-            if givens != prevGivens:
-                # Only recompute prob 1 when givensValues change
-                if givens:
-                    prob1 = self.distr(rv1, givens + givensB)
-                else:
-                    prob1 = self.distr(rv1, givensB)
-            else:
-                # Otherwise use the previously computed prob1
-                prob1 = prevProb1
-            prob2 = self.distr(rv1, spec + givensB)
-            if prob2.N < 5:
-                continue
-            prevGivens = givens
-            prevProb1 = prob1
-            mean1 = prob1.E()
-            mean2 = prob2.E()
-            dep1 = abs((mean1 - mean2))
-            std1 = prob1.stDev()
-            std2 = prob2.stDev()
-            if std1 + std2 > 0:
-                dep2 = abs((std1 - std2) / (std1 + std2))
-                dep2 = abs(std1 - std2)
-            else:
-                dep2 = 0.0
-            if not self.isDiscrete(rv1):
-                sk1 = prob1.skew()
-                sk2 = prob2.skew()
-                ku1 = prob1.kurtosis()
-                ku2 = prob2.kurtosis()
-                dep3 = abs((sk1 - sk2))
-                dep4 = abs((ku1 - ku2))
-                dep3 = 0
-                dep4 = 0
-            else:
-                dep1 = prob1.compare(prob2)
-                dep2 = dep3 = dep4 = 0.0
-            dep = max([dep1, dep2, dep3, dep4])
-            # We accumulate any measured dependency multiplied by the probability of the conditional
-            # clause.  This way, we weight the dependency by the frequency of the event.
-            if DEBUG:
-                print('spec = ', spec, ', givensB = ', givensB, ', dep = ', dep, dep1, dep2, dep3, dep4, prob2.N)
-            condProb = self.jointProb(spec + givensB)
-            accum += dep * condProb
-            accumProb += condProb # The total probability space assessed
-            numTests += 1
-        if accumProb > 0.0:
-            # Normalize the results for the probability space sampled by dividing by accumProb
-            dependence = accum / accumProb
-            return dependence
-        else:
-            print('Cond distr too small.  Accuracy may be impaired: ', rv1, rv2, givensSpec)
-            return 0.0
+
 
     def independence(self, rv1, rv2, givensSpec=None, power=None):
         """
@@ -1042,18 +819,9 @@ class ProbSpace:
             TO DO: Calibrate to an exact p-value.
         """
         dep = self.dependence(rv1, rv2, givensSpec=givensSpec, power=power)
-        # Bound it to [0, 1]
-        dep = max([min([dep, 1]), 0])
         ind = 1 - dep
         return ind
-        if dep > .15:
-            # .15 is the experimental best threshold for separating dependence from independence.
-            # Invert the dependence in interval (.15, 1.0] and map it onto [0, .1]
-            ind = (1-dep) * (.1 / .85)
-        else:
-            # Invert the dependence in interval [0, .15] and map it onto (.1, 1]
-            ind = 1 - dep * (.9 / .15)
-        return ind
+
 
     def isIndependent(self, rv1, rv2, givensSpec=None, power=None):
         """ Determines if two variables are independent, optionally given a set of givens.
@@ -1173,56 +941,6 @@ class ProbSpace:
         rho = num1 / (denom1**.5 * denom2**.5)
         return rho
 
-    def dat2ps(self, adat):
-        ds = self.toOriginalForm(adat)
-        jds = ProbSpace(ds, density = self.density, discSpecs = self.discSpecs, power=self.power)
-        return jds
-
-    def distill(self, filters, minPoints):
-        """
-            Progressively filter the data set until at least minPoints
-            records (observations) remain, or all filters have been used.
-            This is used to filter in the case where filters may be overspecified.
-        """
-        adat = self.aData
-        for f in range(len(filters)):
-            filt = filters[f]
-            filtDat = self.filterDat2([filt], adat = adat)
-            sh = filtDat.shape
-            datLen = sh[1]
-            #if datLen < 1:
-            #    print('eliminating: ', filt)
-            #    break
-            adat = filtDat
-        return adat
-
-    def filterDat2(self, filtSpec, adat = None):
-        if adat is None:
-            adat = self.aData
-        remRecs = []
-        N = adat.shape[1]
-        for i in range(N):
-            include = True
-            for filt in filtSpec:
-                if len(filt) == 2:
-                    field, val = filt
-                    fieldInd = self.fieldIndex[field]
-                    if adat[fieldInd, i] != val:
-                        include = False
-                        break
-                else:
-                    field, valL, valH = filt
-                    fieldInd = self.fieldIndex[field]
-                    fieldVal = adat[fieldInd, i]
-                    if fieldVal < valL or fieldVal >= valH:
-                        include = False
-                        break
-            if not include:
-                remRecs.append(i)
-        # Remove all the non included rows
-        filtered = np.delete(adat, remRecs, 1)
-        return filtered
-
     def Predict(self, Y, X):
         """
             Y is a single variable name.  X is a dataset.
@@ -1244,10 +962,6 @@ class ProbSpace:
         """
             Y is a single variable name.  X is a dataset.
         """
-        delta = .05 # small range of standard deviations around the variable
-        minVals = 100
-        maxVals = int(self.N**.5) * 5
-        maxAttempts = 8
         outPreds = []
         # Make sure Y is not in X
         vars = list(X.keys())
@@ -1272,57 +986,17 @@ class ProbSpace:
         # Vars now contains all the variables that are not indpendent from Y, sorted in
         # order of highest dependence.
 
-        # Get the standard deviation for each variable
-        sigmas = {}
-        for var in vars:
-            aggs = self.fieldAggs[var]
-            sigma = aggs[3]
-            sigmas[var] = sigma
-
         # Get the number of items to predict:
         numTests = len(X[vars[0]])
-        allDiscrete = True
-        for var in vars:
-            if not self.isDiscrete(var):
-                allDiscrete = False
-                break
-        if allDiscrete:
-            attempts = 1
-        else:
-            attempts = maxAttempts
+
         for i in range(numTests):
-            deltaAdjust = 1.0
-            for attempt in range(attempts):
-                delta2 = deltaAdjust * delta
-                filts = []
-                for var in vars:
-                    sigma = sigmas[var]
-                    #print('sigma = ', sigma)
-                    val = X[var][i]
-                    if self.isDiscrete(var):
-                        filts.append((var, val))
-                    else:
-                        # For continuous, use a small range around the value
-                        filts.append((var, val - delta2 * sigma, val + delta2 * sigma))
-                # Determine the minimum and maximum number of points to use for filtering the distribution
-                #print('#', i, ', filts = ', filts)
-                adat = self.distill(filts, minVals)
-                jps = self.dat2ps(adat)
-                dist = jps.distr(Y)
-                N = dist.N
-                #print('N = ', N)
-                if attempt != attempts - 1 and (N < minVals or N > maxVals):
-                    if N == 0:
-                        deltaAdjust *= 5
-                    elif N < minVals:
-                        deltaAdjust *= min([minVals * 1.1 / float(N), 1 + 1.2 / ((attempt+1)**.5)])
-                    else:
-                        # N > maxVals
-                        deltaAdjust *= max([maxVals * .9 / float(N), 1 - .5 / ((attempt+1)**.5)])
-                        continue
-                else:
-                    outPreds.append(dist)
-                    break
+            filts = []
+            for var in vars:
+                val = X[var][i]
+                filts.append((var, val))
+            fs = self.SubSpace(filts)
+            pred = fs.distr(Y)
+            outPreds.append(pred)
         return outPreds
 
     def Plot(self):
