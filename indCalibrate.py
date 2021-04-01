@@ -10,7 +10,7 @@ import time
 
 METHOD = 'prob'
 #METHOD = 'fcit'
-POWER = 3
+POWER = 1
 print('power = ', POWER)
 args = sys.argv
 test = 'Probability/Test/models/indCalibrationDat.csv'

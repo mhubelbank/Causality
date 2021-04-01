@@ -438,15 +438,21 @@ class PDF:
 
     def compare(self, other):
         # Kolmogorov-Smirnov Statistic
-        testRanges = 10
-        minVal1 = self.minVal()
-        minVal2 = other.minVal()
-        maxVal1 = self.maxVal()
-        maxVal2 = other.maxVal()
-        minVal = min([minVal1, minVal2])
-        maxVal = max([maxVal1, maxVal2])
-        #print('minVal, maxVal = ', minVal, maxVal)
-        ranges = list(np.arange(minVal, maxVal + .00001, (maxVal - minVal) / float(testRanges)))
+        if self.isDiscrete:
+            testRanges = self.binCount
+            #print('pdf.compare(discrete): self.N, other.N = ', self.N, other.N)
+        else:
+            minN = min([self.N, other.N])
+            testRanges = min([max([int(minN/10), 5]), 20])
+            #print('testRanges = ', testRanges, self.N, other.N)
+            minVal1 = self.minVal()
+            minVal2 = other.minVal()
+            maxVal1 = self.maxVal()
+            maxVal2 = other.maxVal()
+            minVal = min([minVal1, minVal2])
+            maxVal = max([maxVal1, maxVal2])
+            #print('minVal, maxVal = ', minVal, maxVal)
+            ranges = list(np.arange(minVal, maxVal + .00001, (maxVal - minVal) / float(testRanges)))
         #print('ranges =', len(ranges), ranges)
         N1 = self.N
         N2 = other.N
@@ -454,13 +460,19 @@ class PDF:
         cdf2 = 0.0
         diffs = []
         for i in range(testRanges):
-            r1 = ranges[i]
-            r2 = ranges[i+1]
-            p1 = self.P((r1, r2))
-            p2 = other.P((r1,r2))
-            cdf1 += p1
-            cdf2 += p2
-            #if p1 > 0 and p2 > 0:
+            if self.isDiscrete:
+                val = self.binValue(i)
+                p1 = self.P(val)
+                p2 = other.P(val)
+                cdf1 += p1
+                cdf2 += p2
+            else:
+                r1 = ranges[i]
+                r2 = ranges[i+1]
+                p1 = self.P((r1, r2))
+                p2 = other.P((r1,r2))
+                cdf1 += p1
+                cdf2 += p2
             diff = abs(cdf1 - cdf2)
             diffs.append(diff)
         ks = max(diffs)
@@ -470,7 +482,7 @@ class PDF:
         # This is an inversion of the usual use of KS where comparing D to
         # an alpha based threshold.
         alpha = 2 * e**(-2 *(ks/sqrt((N1+N2)/ (N1*N2)))**2)
-        print('N1, N2, D, alpha = ', N1, N2, ks, alpha)
+        #print('N1, N2, D, alpha = ', N1, N2, ks, alpha)
         return max([0, 1-alpha])
 
     def compare_ks_old(self, other):

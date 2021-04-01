@@ -67,9 +67,6 @@ class ProbSpace:
             npDat.append(ds[field])
         self.aData = np.array(npDat)
         self.N = self.aData.shape[1]
-        if self.N == 0:
-            print('ProbSpace.__init__: Empty Probability Space.')
-            return
         self.probCache = {} # Probability cache
         self.distrCache = {} # Distribution cache
         self.fieldAggs = self.getAgg(ds)
@@ -84,6 +81,9 @@ class ProbSpace:
         self.parentProb = None
         # Parent Query is the query on the parents space that resulted in the subspace.
         self.parentQuery = None
+        if self.N == 0:
+            print('ProbSpace.__init__: Empty Probability Space.')
+
 
     def getAgg(self, ds):
         fieldList = list(ds.keys())
@@ -138,7 +138,6 @@ class ProbSpace:
             bins, min, max, edges, hist, isDiscrete = discSpec
             # Regenerate histogram.  The other data should use the original
             newHist, newEdges = np.histogram(self.aData[i], bins, (min, max))
-            #assert edges == newEdges, 'Bad Edges'
             outSpecs.append((bins, min, max, edges, newHist, isDiscrete))
         return outSpecs
 
@@ -179,7 +178,7 @@ class ProbSpace:
         bucketCount = dSpec[0]
         return range(bucketCount)
 
-    def SubSpace(self, givensSpec, minValues=None, maxValues=None, power=None,
+    def SubSpace(self, givensSpec, minPoints=None, maxPoints=None, power=None,
                         density=None, discSpecs=None):
         """ Return a new ProbSpace object representing a sub-space of the current
             probability space.
@@ -197,8 +196,8 @@ class ProbSpace:
             adjusted so that a "reasonable" number of data points.  By default,
             that "reasonable" number is between 100 and 1000 data points -- enough
             to produce a reliably measurable distribution.   IF desired, different
-            limits can be provided using the minValues and maxValues parameters.
-            For example, by using minValues = 1, and maxValues = 10, one could
+            limits can be provided using the minPoints and maxPoints parameters.
+            For example, by using minPoints = 1, and maxPoints = 10, one could
             request a small number of samples that are the closest to the requested
             values.  Note that sample counts cannot be managed exactly, so it is
             possible to receieve sample counts smaller or greater than the requested
@@ -208,38 +207,36 @@ class ProbSpace:
             power = self.power
         if density is None:
             density = self.density
-        #print('filtSpec = ', filtSpec)
-        filtDat, parentProb, finalQuery = self.filter(givensSpec, minValues=minValues, maxValues=maxValues)
+        filtDat, parentProb, finalQuery = self.filter(givensSpec, minPoints=minPoints, maxPoints=maxPoints)
         newPS = ProbSpace(filtDat, power = power, density = density, discSpecs = discSpecs)
         newPS.parentProb = parentProb
         newPS.parentQuery = finalQuery
         return newPS
 
-    def filter(self, filtSpec, minValues=None, maxValues=None):
+    def filter(self, filtSpec, minPoints=None, maxPoints=None):
         """ Filter the data based on a set of filterspecs: [filtSpec, ...]
             filtSpec := (varName, value) or (varName, lowValue, highValue)
             Returns a data set in the original {varName:[varData], ...}
             dictionary format.
             See FilteredSpace documentation (above) for details.
         """
-        filtdata, parentProb, finalQuery = self.filterDat(filtSpec, minValues, maxValues)
+        filtdata, parentProb, finalQuery = self.filterDat(filtSpec, minPoints, maxPoints)
         # Now convert to orginal format, with only records that passed filter
         outData = self.toOriginalForm(filtdata)
         return outData, parentProb, finalQuery
 
-    def filterDat(self, filtSpec, minValues=None, maxValues=None, adat = None):
+    def filterDat(self, filtSpec, minPoints=None, maxPoints=None, adat = None):
         """ Filter the data in its array form and return a filtered array.
             See FilteredSpace documentation (above) for details.
         """
-        #print('in filterDat.  filtSpec = ', filtSpec)
         maxAttempts = 8
-        delta = .1
-        minValues_default = max([min([100, sqrt(self.N)]), 20])
-        maxValues_default = max([min([1000, int(self.N / 2)]), minValues_default * 5])
-        if minValues is None:
-            minValues = minValues_default
-        if maxValues is None:
-            maxValues = maxValues_default
+        delta = .05
+        minPoints_default = max([min([100, sqrt(self.N)]), 20])
+        maxPoints_default = max([min([1000, int(self.N / 2)]), minPoints_default * 5])
+        if minPoints is None:
+            minPoints = minPoints_default
+        if maxPoints is None:
+            maxPoints = maxPoints_default
         if adat is None:
             adat = self.aData
         
@@ -270,7 +267,6 @@ class ProbSpace:
                     std = aggs[3] # Standard deviation
                     sDelta = delta * std # Scaled delta
                     filtSpec2.append((var, val - sDelta, val + sDelta))
-            #print('filtSpec2 = ', filtSpec2)
             remRecs = []
             for i in range(self.N):
                 include = True
@@ -293,7 +289,7 @@ class ProbSpace:
                         if low is None:
                             low = varMin
                         if high is None:
-                            high = varMax
+                            high = varMax + .0001
                         val = adat[fieldInd, i]
                         if val < low or val >= high:
                             include = False
@@ -301,17 +297,17 @@ class ProbSpace:
                 if not include:
                     remRecs.append(i)
             remaining = self.N - len(remRecs)
-            targetVal = maxValues * .9
+            targetVal = maxPoints * .5
             if remaining == 0:
                 delta *= 5
-            elif remaining < minValues:
+            elif remaining < minPoints:
                 delta *= min([targetVal / float(remaining), 1 + 1.2 / ((attempt+1)**.5)])
-            elif remaining > maxValues:
+            elif remaining > maxPoints:
                 delta *= max([targetVal / float(remaining), 1 - .5 / ((attempt+1)**.5)])
             else:
                 break
-        if progressive:
-            #print('attempt = ', attempt, ', delta = ', delta, ', remaining = ', remaining, ', minVal, maxVal = ', minValues, maxValues)
+        if DEBUG and progressive:
+            print('attempt = ', attempt, ', delta = ', delta, ', remaining = ', remaining, ', minVal, maxVal = ', minPoints, maxPoints)
             #print('finalQuery = ', filtSpec2, ', parentProb = ', remaining/self.N, ', parentN = ', self.N)
             pass
         # Remove all the non included rows
@@ -338,7 +334,7 @@ class ProbSpace:
         hashKey = (targetSpec, givenSpec)
         return hashKey
 
-    def E(self, target, givensSpec, power=None):
+    def E(self, target, givensSpec=None, power=None):
         """ Returns the expected value (i.e. mean) of the distribution
             of a single variable given a set of conditions.  This is
             a convenience function equivalent to:
@@ -487,8 +483,6 @@ class ProbSpace:
             if not hist:
                 hist = [0] * bins
             edges = list(dSpec[3])
-            minV = dSpec[1]
-            maxV = dSpec[2]
             outHist = []
             for i in range(len(hist)):
                 cnt = hist[i]
@@ -511,23 +505,11 @@ class ProbSpace:
         else:
             # Conditional Probability
             condSpecs, filtSpecs = self.separateSpecs(givenSpecs)
-            #print('filtSpecs = ', filtSpecs)
-            if filtSpecs:
-                # Create a new probability object based on the filtered data
-                if condSpecs:
-                    filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, discSpecs=self.discSpecs)
-                else:
-                    filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power)
-            else:
-                filtSpace = self
             if not condSpecs:
                 # Nothing to conditionalize on.  We can just return the selected variable
                 # from the filtered distribution
-                if not DISC_DISTS:
-                    dat = filtSpace.aData[indx, :]
-                else:
-                    dat = None
-                outPDF = filtSpace.distr(rvName, data=dat)
+                filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, discSpecs=self.discSpecs, minPoints = 100, maxPoints = sqrt(self.N))
+                outPDF = filtSpace.distr(rvName)
             else:
                 # Conditionalize on all indicated variables. I.e.,
                 # SUM(P(filteredY | Z=z) * P(Z=z)) for all z in Z.
@@ -536,33 +518,32 @@ class ProbSpace:
                 for given in condSpecs:
                     conditionalizeOn.append(given)
                 condFiltSpecs = self.getCondSpecs(conditionalizeOn, power=power)
-                #print('condFiltSpecs = ', condFiltSpecs)
                 #countRatio = float(self.N) / filtSample.N
                 allProbs = 0.0 # The fraction of the probability space that has been tested.
                 for cf in condFiltSpecs:
                     # Create a new subspace filtered by both the bound and unbound conditions
                     # Note that progressive filtering will be used for the unbound conditions.
-                    #print('filtSpace.N = ', filtSpace.N, ', cf = ', cf)
-                    #ss = filtSpace.SubSpace(cf, density = self.density, power = self.power, discSpecs=self.discSpecs)
                     # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
-                    probYgZ = filtSpace.distr(rvName, cf)
-                    #probYgZ = ss.distr(rvName)
-                    # Due to progressive filtering, we need to get the actual final filter used in producing ss
-                    #finalFilter = ss.parentQuery
-                    # Now we can compute probZ as the probability of the finalFilter in the main distribution
-                    probZ = probYgZ.N / self.N
-                    #print('probZ = ', probZ, ', probYgZ/E() = ', probYgZ.E())
-                    #probZ = self.jointProb(finalFilter) # P(Z=z)
+                    ss = self.SubSpace(cf, minPoints=sqrt(self.N), maxPoints=self.N/2, discSpecs=self.discSpecs)
+                    if filtSpecs:
+                        # If we have other (bound) filtering to do, we do it here.
+                        ss2 = ss.SubSpace(filtSpecs, discSpecs=self.discSpecs, minPoints = 100, maxPoints = ss.N/2)
+                    else:
+                        # No further filtering.  Use this distribution.
+                        ss2 = ss
+                    probYgZ = ss2.distr(rvName)
+                    #probYgZ = filtSpace.distr(rvName, cf)
+                    # Now we can compute probZ as ratio of the number of data points in the filtered distribution and the original
+                    
+                    probZ = ss.N / self.N
+                    #print('probZ = ', probZ, ', probYgZ/E() = ', probYgZ.E(), ', probYgZ.N = ', probYgZ.N, ', ss.N = ', ss.N, ', ss.query = ', ss.parentQuery, ', ss2.query = ', ss2.parentQuery)
                     if probZ == 0:
-                        #print('probZ = 0')
                         # Zero probability -- don't bother accumulating
                         continue
                     probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
                     accum += probs
                     allProbs += probZ
-                    #print('distr: cf = ', cf, ', probs = ', probYgZ.stats(), ', probZ = ', probZ)
                 accum = accum / allProbs
-                N = filtSpace.N
                 # Now we start with a pdf of the original variable to establish the ranges, and
                 # then replace the actual probabilities of each bin.  That way we maintain the
                 # original bin structure. 
@@ -573,7 +554,7 @@ class ProbSpace:
                     newprob = accum[i]
                     newBin = pdfBin[:-1] + (newprob,)
                     outSpecs.append(newBin)
-                outPDF = PDF(N, outSpecs, isDiscrete = isDiscrete)
+                outPDF = PDF(ss2.N, outSpecs, isDiscrete = isDiscrete)
             self.distrCache[cacheKey] = outPDF
             return outPDF
 
@@ -627,7 +608,7 @@ class ProbSpace:
                 # of the next one.  That way, we sample using the mean and std
                 # of the variable in the conditioned space of the previous vars.
                 if s != len(spec) - 1:
-                    currPS = currPS.SubSpace([varSpec], maxValues=currPS.N)
+                    currPS = currPS.SubSpace([varSpec], maxPoints=currPS.N)
             #print('outSpec = ', outSpec)
             outCS.append(outSpec)
         #print('outCS = ', outCS)
@@ -652,7 +633,7 @@ class ProbSpace:
                         testVals.append(-tp,)
                         testVals.append(tp,)
             return testVals
-        levelSpecs0 = [1, .25, .5, .75, .25, .1, 1.5, 1.25, 1.75, 2.0]
+        levelSpecs0 = [.5, .25, .75, 1, .25, .1, 1.5, 1.25, 1.75, 2.0]
         maxLevel = 3 # Largest standard deviation to sample
         if power <= 10:
             levelSpecs = levelSpecs0
@@ -732,15 +713,13 @@ class ProbSpace:
             # givens is conditional on spec without rv2
             #print('spec = ', spec)
             if spec is None: # Unconditional Independence
-                ss1 = self
-                prob1 = self.distr(rv1)
+                ss1 = self.SubSpace(givensB)
+                prob1 = ss1.distr(rv1)
             else:
                 givens = spec
                 if givens != prevGivens:
                     # Only recompute prob 1 when givensValues change
                     # Get a subsapce filtered by all givens, but not rv2
-                    #ss1 = self.SubSpace(givens + givensB, minValues=1000, maxValues=self.N, discSpecs = self.discSpecs)
-                    #ss1 = self.SubSpace(givens + givensB, minValues=1000, maxValues=self.N)
                     ss1 = self.SubSpace(givens + givensB)
                     prob1 = ss1.distr(rv1)
                     prevProb1 = prob1
@@ -755,9 +734,9 @@ class ProbSpace:
             for testSpec in testSpecs:
                 # prob2 is the conditional subspace of everything but rv2
                 # conditioned on rv2
-                #ss2 = ss1.SubSpace(testSpec, minValues = 100, maxValues = ss1.N, discSpecs = self.discSpecs)
-                #ss2 = ss1.SubSpace(testSpec, minValues = 100, maxValues = ss1.N)
-                ss2 = ss1.SubSpace(testSpec)
+                #ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N, discSpecs = self.discSpecs)
+                #ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N)
+                ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N/2)
                 prob2 = ss2.distr(rv1)
                 if prob2.N == 0:
                     continue
