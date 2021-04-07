@@ -29,8 +29,8 @@ varEquations = [
                 'F = logistic(5, 2)',
                 'G = logistic(-2, 1)',
 			    'A = .5 * B + .3 * F + logistic(0, 2)',
-                'D = .25 * A + .35 * G + logistic(0,5)',
- 			    'C = .1 * B + .2 * D + logistic(0, 5)',
+                'D = .25 * A + .35 * G + logistic(0,1)',
+ 			    'C = .4 * B + .5 * D + logistic(0, 1)',
                 'E = .5 * C + logistic(0,3)',
                 't = t + 1'
 		        ]

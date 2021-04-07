@@ -42,15 +42,19 @@ class cGraph:
                 self.edgeDict[d] = [edge]
         # Create a probability space object for later use
         self.prob = Prob.ProbSpace(self.data, power=1)
-        for rvName in self.rvList:
-            rv = self.rvDict[rvName]
-            if rv.isObserved:
-                self.vPrint(rvName)
+        # Create a separate standardized probability space for independence testing.
+        iData = {}
+        for var in self.data.keys():
+            iData[var] = standardize(self.data[var])
+        self.iProb = Prob.ProbSpace(iData)
+
+        self.bdCache = {}
+        self.fdCache = {}
 
     def vPrint(self, varName):
         """ Print statistical information about a variable"""
         d = self.prob.distr(varName)
-        print('stats(', varName,':', 'm1 =', d.E(), ', m2 =', d.stDev(), ', m3 =',  d.skew(), ', m4 =', d.kurtosis())
+        print('stats(', varName,':', 'mean =', d.E(), ', stDev =', d.stDev(), ', skew =',  d.skew(), ', kurtosis =', d.kurtosis())
         
     def isExogenous(self, varName):
         rv = self.rvDict[varName]
@@ -127,7 +131,7 @@ class cGraph:
         return (nDeps, nCDeps, nDeps + nCDeps)
 
     def getCombinations(self, nodes=None, order=3, minOrder = 1):
-        print ('order = ', order)
+        #print ('order = ', order)
         from itertools import combinations
         if nodes is None:
             nodes = self.g.nodes()
@@ -225,6 +229,7 @@ class cGraph:
     #
     def TestModel(self, data=None, order=3):
         # Standardize the data before doing independence testing
+        warningPenalty = .0025
         iData = {}
         for var in self.data.keys():
             iData[var] = standardize(self.data[var])
@@ -256,20 +261,17 @@ class cGraph:
                 testType = 2
             numTestsPerType[testType] += 1
             if testType == 0 and pval < .5:
-                if pval < .4:
                     errStr = 'Error (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
-                else:
-                    warnStr = 'Warning (Type 0 -- Exogenous variables not independent) -- Expected: ' + self.formatDependency(dep) + ' but possible dependence was detected. P-val = ' + str(pval)
             elif testType == 2 and pval > .5:
-                if pval > .6:
+                if pval > .75:
                     errStr = 'Error (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but no dependence detected.  P-val = ' + str(pval)
                 else:
                     warnStr = 'Warning (Type 2 -- Unexpected independence) -- Expected: ' +  self.formatDependency(dep) + ' but minimal dependence detected.  P-val = ' + str(pval)
             elif testType == 1 and pval < .5:
-                if pval < .4:
+                if pval < .25:
                     errStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but dependence was detected. P-val = ' + str(pval)
                 else:
-                    warnStr = 'Error (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but some dependence was detected. P-val = ' + str(pval)
+                    warnStr = 'Warning (Type 1 -- Unexpected dependence) -- Expected: ' + self.formatDependency(dep) + ' but some dependence was detected. P-val = ' + str(pval)
             if errStr:
                 if VERBOSE:
                     print('***', errStr)
@@ -278,9 +280,9 @@ class cGraph:
                 numErrsPerType[testType] += 1
             if warnStr:
                 if VERBOSE:
-                    print('***', warnStr)
+                    print('*', warnStr)
                     #5/0
-                warnings.append((testType, [x], [y], list(z), isDep, pval, errStr))
+                warnings.append((testType, [x], [y], list(z), isDep, pval, warnStr))
             elif VERBOSE:
                 print('.',)
         # Now test directionalities
@@ -293,13 +295,17 @@ class cGraph:
                 derrs += 1
                 if abs(rho) < .0001:
                     resStr = 'True direction could not be verified.'
+                    warnStr = 'Warning (Type 3 -- Incorrect Causal Direction) between ' + cause + ' and ' + effect + '. ' + resStr + '.  Rho = ' + str(rho)
+                    warnings.append((testType, [cause], [effect], [], False, rho, warnStr))
+                    if VERBOSE:
+                        print('*', warnStr)
                 else:
                     resStr = 'Direction appears to be reversed.'
-                errStr = 'Error (Type 3 -- Incorrect Causal Direction between ' + cause + ' and ' + effect + '. ' + resStr + '.  Rho = ' + str(rho)
-                if VERBOSE:
-                    print('***', errStr)
-                errors.append((testType, [cause], [effect], [], False, rho, errStr))
-                numErrsPerType[testType] += 1
+                    errStr = 'Error (Type 3 -- Incorrect Causal Direction) between ' + cause + ' and ' + effect + '. ' + resStr + '.  Rho = ' + str(rho)
+                    errors.append((testType, [cause], [effect], [], False, rho, errStr))
+                    if VERBOSE:
+                        print('***', errStr)
+                    numErrsPerType[testType] += 1
             numTestsPerType[testType] += 1
         confidence = 1.0
         failurePenaltyPerType = [1, 1, 1, 1]
@@ -311,38 +317,18 @@ class cGraph:
                 ratio = nErrs / nTests
                 errorRatios[i] = ratio
                 confidence -= ratio * failurePenaltyPerType[i] / numTestTypes
+        warnPenalty = len(warnings) * warningPenalty
+        confidence -= warnPenalty
         confidence = max([confidence, 0.0])
         numTotalTests = len(deps)
         if VERBOSE:
-            print('Model Testing Completed with', len(errors), 'error(s).  Confidence = ', round(confidence * 100, 1), '%')
+            print('Model Testing Completed with', len(errors), 'error(s) and', len(warnings), ' warning(s).  Confidence = ', round(confidence * 100, 1), '%')
         return (confidence, numTotalTests, numTestsPerType, numErrsPerType, errors, warnings)
 
     def testDirection(self, x, y):
         rho = direction.direction(self.data[x], self.data[y])
         return rho
-        # if abs(R) > epsilon:
-        #     determinate = True
-        #     if R > 0:
-        #         cause = x
-        #         effect = y
-        #     else:
-        #         cause = y
-        #         effect = x
-        # else:
-        #     determinate = False
-        # shouldBe = x + ' -> ' + y
-        # marker = ''
-        # if VERBOSE:
-        #     if determinate:
-        #         if cause + ' -> ' + effect != shouldBe:
-        #             errors += 1
-        #             marker = '***'
-        #         print(marker, cause, '->', effect, ', should be: ', shouldBe, ',R = ', R)
-        #     else:
-        #         if shouldBe != 'Indeterminate':
-        #             marker = '***'
-        #             errors += 1
-        #         print(marker, x, '--', y, ', Indeterminate, should be: ', shouldBe, ',R = ', R)
+
     def testAllDirections(self):
         epsilon = .0001
         rvList = list(self.rvList)
@@ -392,8 +378,8 @@ class cGraph:
             else:
                 isExo = True
                 for exo in exos:
-                    pval = independence.test(self.prob, [var], [exo])
-                    print('ind ', var, '-', exo, ' = ', pval)
+                    pval = independence.test(self.iProb, [var], [exo])
+                    #print('ind ', var, '-', exo, ' = ', pval)
                     if pval < .5:
                         isExo = False
                         break
@@ -402,12 +388,25 @@ class cGraph:
                     exos.append(var)
                 else:
                     break
-                        
-        if VERBOSE:
-            print('\nExogenous = ', exos, '\n')
-            #print('scores = ', scores, accum)
+        return exos
 
-    def intervene(self, targetRV, doList, controlFor = []):
+    def findChildVars(self, parentList):
+        outMap = []
+        for var in self.rvList:
+            for pvar in parentList:
+                if var in parentList:
+                    continue
+                pval = self.iProb.independence(pvar, var)
+                isInd = False
+                if pval > .5:
+                    isInd = True
+                print('ind ', pvar, '-', var, ' = ', pval)
+                if isInd:
+                    continue
+                outMap.append((pvar, var))
+        return outMap
+
+    def intervene(self, targetRV, doList, controlFor = [], power=1):
         """ Implements Intverventions (Level2 of Ladder of Causality)
             of the form P(Y | do(X1=x1)).  That is, the Probability
             of Y given that we set X1 to x1.  This is generalized
@@ -435,34 +434,34 @@ class cGraph:
         # Now we compute the probability distribution of Y conditionalized on all of the blocking
         # variables.
         given = doList + blockingSet + controlFor
-        distr = self.prob.distr(targetRV, given)
+        distr = self.prob.distr(targetRV, given, power=power)
         # We return the probability distribution
         return distr
 
-    def ACE(self, cause, effect):
+    def ACE(self, cause, effect, power=1):
         """ Average Causal Effect of cause on effect.
         """
         causeDistr = self.prob.distr(cause)
         causeMean = causeDistr.E()
         causeStd = causeDistr.stDev()
-        effectAtMean = self.intervene(effect, [(cause, causeMean)]).E()
-        tests = [-1, -.5, -.2, .2, .5, 1 ]
+        tests = [.2, .5, 1 ]
         testResults = []
         for test in tests:
-            testBound = causeMean + (causeStd * test)
-            diff = testBound - causeMean
-            effectAtBound = self.intervene(effect, [(cause, testBound)]).E()
-            ace = (effectAtBound - effectAtMean) / diff
+            lowBound = causeMean - (causeStd * test)
+            highBound = causeMean + (causeStd * test)
+            diff = highBound - lowBound
+            effectAtLow = self.intervene(effect, [(cause, lowBound)], power=power).E()
+            effectAtHigh = self.intervene(effect, [(cause, highBound)], power=power).E()
+            ace = (effectAtHigh - effectAtLow) / diff
             testResults.append(ace)
         #print('testResults = ', testResults)
         tr = np.array(testResults)
         final = float(np.mean(tr))
-        #print('tr = ', list(tr))
         #print('ACE = ', effectAtMean, effectAtUpper, ace)
         return final
 
 
-    def CDE(self, cause, effect):
+    def CDE(self, cause, effect, power=1):
         """ Controlled Direct Effect of cause on effect
         """
         causeDistr = self.prob.distr(cause)
@@ -474,14 +473,15 @@ class cGraph:
         bdBlocking = self.findBackdoorBlockingSet(cause, effect)
         fdBlocking = self.findFrontdoorBlockingSet(cause, effect)
         given = bdBlocking + fdBlocking
-        effectAtMean = distr = self.prob.distr(effect, [(cause, causeMean)] + given).E()
-        tests = [-1, -.5, -.2, .2, .5, 1 ]
+        tests = [.2, .5, 1 ]
         testResults = []
         for test in tests:
-            testBound = causeMean + (causeStd * test)
-            diff = testBound - causeMean
-            effectAtBound = distr = self.prob.distr(effect, [(cause, testBound)] + given).E()
-            cde = (effectAtBound - effectAtMean) / diff
+            lowBound = causeMean - (causeStd * test)
+            highBound = causeMean + (causeStd * test)
+            diff = highBound - lowBound
+            effectAtLow = self.prob.distr(effect, [(cause, lowBound)] + given, power=power).E()
+            effectAtHigh = self.prob.distr(effect, [(cause, highBound)] + given, power=power).E()
+            cde = (effectAtHigh - effectAtLow) / diff
             testResults.append(cde)
         #print('testResults = ', testResults)
         tr = np.array(testResults)
@@ -492,6 +492,9 @@ class cGraph:
         """ Find the minimal set of nodes that block all backdoor paths from source
             to target.
         """
+        cacheKey = (source, target)
+        if cacheKey in self.bdCache.keys():
+            return self.bdCache[cacheKey]
         maxBlocking = 3
         bSet = []
         # find all paths from parents of source to target.
@@ -543,9 +546,13 @@ class cGraph:
                 break
 
         print('BDblocking = ', bSet)
+        self.bdCache[cacheKey] = bSet
         return bSet
 
     def findFrontdoorBlockingSet(self, source, target):
+        cacheKey = (source, target)
+        if cacheKey in self.fdCache.keys():
+            return self.fdCache[cacheKey]
         backdoorSet = self.findBackdoorBlockingSet(source, target)
         maxBlocking = 2
         bSet = []
@@ -561,7 +568,7 @@ class cGraph:
         # Use that view to find all indirect paths from source to dest
         paths0 = networkx.all_simple_paths(vg, source, target)
         paths = [path for path in paths0]
-        print('paths = ', paths)
+        #print('paths = ', paths)
         if len(paths) == 0:
             # No indirect paths
             return []
@@ -590,7 +597,7 @@ class cGraph:
         # Now add any multiple field combinations.  Order is not significant here.
         multiCombos = self.getCombinations(pathNodes.keys(), maxBlocking, minOrder=2)
         combos += multiCombos
-        print('combos = ', combos)
+        #print('combos = ', combos)
         for nodeSet in combos:
             testSet = set(list(nodeSet) + list(backdoorSet))
             #print('testSet = ', list(testSet))
@@ -599,5 +606,6 @@ class cGraph:
                 break
 
         print('FDblocking = ', bSet)
+        self.fdCache[cacheKey] = bSet
         return bSet
 

@@ -421,6 +421,144 @@ class ProbSpace:
 
     P = prob
 
+    def distr_experimental(self, rvName, givenSpecs=None, power=None):
+        """Return a univariate probability distribution as a PDF (see pdf.py) for the random variable
+           indicated by rvName.
+           If givenSpec is provided, then will return the conditional distribution,
+           otherwise will return the unconditional (i.e. marginal) distribution.
+           This satisfies the following types of probability queries:
+            - P(Y) -- (marginal) Probability distribution of Y
+            - P(Y | X=x) -- Conditional probability
+            - P(Y | X1=x1, ... ,Xk = xk) -- Multiple conditions
+            - P(Y | X=x, Z) -- i.e. Conditionalize on Z
+            - P(Y | X=x, Z1, ... Zk) -- Conditionalize on multiple variables
+
+            rvName is the name of the random variable whose distribution is requested.
+            givenSpec (given specification) defines the conditions (givens) to
+            be applied.
+            A given specification may take one of several forms:
+            - 2-tuple (varName, value) - Variable taking on a given value.
+            - 3-tuple: (varName, minValue, maxValue) indicating an interval:
+                [minValue, maxValue) (i.e. minValue <= value < maxValue).
+                minValue or maxValue may be None.  A minValue of None implies 
+                -infinity.  A maxValue of None implies infinity.
+            - variable name: A variable to conditionalize on.
+            - list of any of the above or any combination of above.
+
+            Examples:
+            - distr('Y') -- The (marginal) probability of Y
+            - distr('Y', [('X', 1)]) -- The probability of Y given X=1.
+            - distr('Y', [('X', 1, 2)]) -- The probability of Y given 1 <= X < 2.
+            - distr('Y', ('X', 1)) -- The probability of Y given X=1 (same as above)
+            - distr('Y', [('X1', 1), ('X2', 0)]) - The probability of Y given X1 = 1, and X2 = 0
+            - distr('Y', [('X', 1), 'Z']) -- The probability of Y given X = 1, conditionalized on Z
+
+            Conditionalization is taking the probability weighted sum of the results for every value
+            of the conditionalizing variable or combination of conditionalizing variables.
+            For example:
+            - P(Y | X=1, Z) is: sum over all (Z=z) values( P(Y | X=1, Z=z) * P(Z=z))
+        """
+        DISC_DISTS = True # If False, use full data for distributions.  Otherwise use binned data.
+                          # Will be much slower and slightly more accurate if False.
+
+        if power is None:
+            power = self.power
+        if givenSpecs is None:
+            givenSpecs = []
+        if type(givenSpecs) != type([]):
+            givenSpecs = [givenSpecs]
+        cacheKey = self.makeHashkey(rvName, givenSpecs)
+        if cacheKey in self.distrCache.keys():
+             return self.distrCache[cacheKey]
+        if DEBUG:
+            print('ProbSpace.distr: P(' , rvName, '|', givenSpecs , ')')
+        isDiscrete = self.isDiscrete(rvName)
+        indx = self.fieldIndex[rvName]
+        dSpec = self.discSpecs[indx]
+        bins = dSpec[0]
+
+        if not givenSpecs:
+            # Marginal (unconditional) Probability
+            bins = dSpec[0]
+            hist = list(dSpec[4])
+            if not hist:
+                hist = [0] * bins
+            edges = list(dSpec[3])
+            outHist = []
+            for i in range(len(hist)):
+                cnt = hist[i]
+                if self.N > 0:
+                    outHist.append(cnt / self.N)
+                else:
+                    outHist.append(0)
+            pdfSpec = []
+            for i in range(len(outHist)):
+                start = edges[i]
+                end = edges[i+1]
+                pdfSpec.append((i, start, end, outHist[i]))
+            if not DISC_DISTS:
+                dat = self.aData[indx,:]
+            else:
+                dat = None
+            outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete, data=dat)
+        else:
+            # Conditional Probability
+            condSpecs, filtSpecs = self.separateSpecs(givenSpecs)
+            totalDepth = len(condSpecs) + len(filtSpecs)
+            p = self.reductionExponent(totalDepth)
+            filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, minPoints = 100, maxPoints = sqrt(self.N))
+            if not condSpecs:
+                # Nothing to conditionalize on.  We can just return the selected variable
+                # from the filtered distribution
+                mean = filtSpace.aData[indx,:].mean()
+                print('mean = ', mean)
+                print('filtspace.N, parentQuery = ', filtSpace.N, filtSpace.parentQuery)
+                outPDF = filtSpace.distr(rvName)
+            else:
+                # Conditionalize on all indicated variables. I.e.,
+                # SUM(P(filteredY | Z=z) * P(Z=z)) for all z in Z.
+                accum = np.zeros((bins,))
+                conditionalizeOn = condSpecs
+                condFiltSpecs = filtSpace.getCondSpecs(conditionalizeOn, power=power, hierarchical=True, reductionExp=p)
+                #countRatio = float(self.N) / filtSample.N
+                allProbs = 0.0 # The fraction of the probability space that has been tested.
+                for cf in condFiltSpecs:
+                    # Create a new subspace filtered by both the bound and unbound conditions
+                    # Note that progressive filtering will be used for the unbound conditions.
+                    # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
+                    minPoints = filtSpace.N**(p**len(conditionalizeOn))
+                    maxPoints = minPoints * 5
+                    #print('N, min, max = ', self.N, minPoints, maxPoints)
+                    ss = filtSpace.SubSpace(cf, minPoints=0, maxPoints=maxPoints, discSpecs=self.discSpecs)
+                    print('ss.parentQuery = ', ss.parentQuery, ss.N)
+                    probYgZ = ss.distr(rvName)
+                    #probYgZ = filtSpace.distr(rvName, cf)
+                    # Now we can compute probZ as ratio of the number of data points in the filtered distribution and the original
+                    
+                    #probZ = ss.N / filtSpace.N
+                    probZ = self.distr(rvName, cf).N / self.N
+                    #print('probZ = ', probZ, ', probYgZ/E() = ', probYgZ.E(), ', probYgZ.N = ', probYgZ.N, ', ss.N = ', ss.N, ', ss.query = ', ss.parentQuery, ', ss2.query = ', ss2.parentQuery)
+                    if probZ == 0:
+                        # Zero probability -- don't bother accumulating
+                        continue
+                    probs = probYgZ.ToHistogram() * probZ # Creates an array of probabilities
+                    accum += probs
+                    allProbs += probZ
+                accum = accum / allProbs
+                # Now we start with a pdf of the original variable to establish the ranges, and
+                # then replace the actual probabilities of each bin.  That way we maintain the
+                # original bin structure. 
+                template = self.distr(rvName)
+                outSpecs = []
+                for i in range(len(accum)):
+                    pdfBin = template.getBin(i)
+                    newprob = accum[i]
+                    newBin = pdfBin[:-1] + (newprob,)
+                    outSpecs.append(newBin)
+                outPDF = PDF(ss.N, outSpecs, isDiscrete = isDiscrete)
+        self.distrCache[cacheKey] = outPDF
+        return outPDF
+
     def distr(self, rvName, givenSpecs=None, power=None):
         """Return a univariate probability distribution as a PDF (see pdf.py) for the random variable
            indicated by rvName.
@@ -460,8 +598,7 @@ class ProbSpace:
         """
         DISC_DISTS = True # If False, use full data for distributions.  Otherwise use binned data.
                           # Will be much slower and slightly more accurate if False.
-        if DEBUG:
-            print('ProbSpace.distr: P(' , rvName, '|', givenSpecs , ')')
+
         if power is None:
             power = self.power
         if givenSpecs is None:
@@ -471,6 +608,8 @@ class ProbSpace:
         cacheKey = self.makeHashkey(rvName, givenSpecs)
         if cacheKey in self.distrCache.keys():
              return self.distrCache[cacheKey]
+        if DEBUG:
+            print('ProbSpace.distr: P(' , rvName, '|', givenSpecs , ')')
         isDiscrete = self.isDiscrete(rvName)
         indx = self.fieldIndex[rvName]
         dSpec = self.discSpecs[indx]
@@ -500,15 +639,15 @@ class ProbSpace:
             else:
                 dat = None
             outPDF = PDF(self.N, pdfSpec, isDiscrete=isDiscrete, data=dat)
-            self.distrCache[cacheKey] = outPDF
-            return outPDF
         else:
             # Conditional Probability
             condSpecs, filtSpecs = self.separateSpecs(givenSpecs)
             if not condSpecs:
                 # Nothing to conditionalize on.  We can just return the selected variable
                 # from the filtered distribution
-                filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, discSpecs=self.discSpecs, minPoints = 100, maxPoints = sqrt(self.N))
+                filtSpace = self.SubSpace(filtSpecs, density = self.density, power = self.power, minPoints = 100, maxPoints = sqrt(self.N))
+                mean = filtSpace.aData[indx,:].mean()
+                #print('filtspace.N, parentQuery = ', filtSpace.N, filtSpace.parentQuery)
                 outPDF = filtSpace.distr(rvName)
             else:
                 # Conditionalize on all indicated variables. I.e.,
@@ -517,20 +656,36 @@ class ProbSpace:
                 conditionalizeOn = []
                 for given in condSpecs:
                     conditionalizeOn.append(given)
-                condFiltSpecs = self.getCondSpecs(conditionalizeOn, power=power)
+                totalDepth = len(conditionalizeOn)
+                if filtSpecs:
+                    totalDepth += len(filtSpecs)
+                #print('totalDepth = ', totalDepth)
+                p = self.reductionExponent(totalDepth)
+                #print('p = ', p)
+                condFiltSpecs = self.getCondSpecs(conditionalizeOn, power=power, hierarchical=True, reductionExp=p)
                 #countRatio = float(self.N) / filtSample.N
                 allProbs = 0.0 # The fraction of the probability space that has been tested.
                 for cf in condFiltSpecs:
                     # Create a new subspace filtered by both the bound and unbound conditions
                     # Note that progressive filtering will be used for the unbound conditions.
                     # probYgZ is P(Y | Z=z) e.g., P(Y | X=1, Z=z)
-                    ss = self.SubSpace(cf, minPoints=sqrt(self.N), maxPoints=self.N/2, discSpecs=self.discSpecs)
+                    minPoints = self.N**(p**len(conditionalizeOn))
+                    maxPoints = minPoints * 5
+                    #print('N, min, max = ', self.N, minPoints, maxPoints)
+                    ss = self.SubSpace(cf, minPoints=minPoints, maxPoints=maxPoints, discSpecs=self.discSpecs)
+                    #print('ss.parentQuery = ', ss.parentQuery, ss.N)
                     if filtSpecs:
                         # If we have other (bound) filtering to do, we do it here.
-                        ss2 = ss.SubSpace(filtSpecs, discSpecs=self.discSpecs, minPoints = 100, maxPoints = ss.N/2)
+                        minPoints = ss.N**(p**len(filtSpecs))
+                        maxPoints = minPoints * 5
+                        #print('N, min, max (2) = ', ss.N, minPoints, maxPoints)
+                        # Allow 0 points to be found if we are outside the current space.
+                        ss2 = ss.SubSpace(filtSpecs, discSpecs=self.discSpecs, minPoints = 0, maxPoints = maxPoints)
+                        #print('ss2.parentQuery = ', ss2.parentQuery, ss2.N)
                     else:
                         # No further filtering.  Use this distribution.
                         ss2 = ss
+                    #print('ss2.N = ', ss2.N)
                     probYgZ = ss2.distr(rvName)
                     #probYgZ = filtSpace.distr(rvName, cf)
                     # Now we can compute probZ as ratio of the number of data points in the filtered distribution and the original
@@ -555,12 +710,17 @@ class ProbSpace:
                     newBin = pdfBin[:-1] + (newprob,)
                     outSpecs.append(newBin)
                 outPDF = PDF(ss2.N, outSpecs, isDiscrete = isDiscrete)
-            self.distrCache[cacheKey] = outPDF
-            return outPDF
+        self.distrCache[cacheKey] = outPDF
+        return outPDF
 
     PD = distr
 
-    def getCondSpecs(self, condVars, power=2):
+    def reductionExponent(self, totalDepth):
+        minPoints = 200
+        p = log(minPoints, self.N)**(1 / totalDepth)
+        return p
+
+    def getCondSpecs(self, condVars, power=2, hierarchical=True, reductionExp=None):
         """ Produce a set of conditional specifications for stochastic
             conditionalization, given
             a set of variables to conditionalize on, and a desired power level.
@@ -581,9 +741,19 @@ class ProbSpace:
             of combinations = K**(2 * P + 1) for values of P < 100.
         """
         rawCS = self.getCondSpecs2(condVars, power = power)
+        if reductionExp is None:
+            p = self.reductionExponent(len(condVars)) # The exponent of the number of data points for each level
+        else:
+            p = reductionExp
+        #print('p = ', p)
         #print('rawCS = ', rawCS, ', power = ', power)
         outCS = []
+        rotation = 0
         for spec in rawCS:
+            # If hierarchical sampling, rotate the variables so that they take turns being
+            # the top variable.
+            if rotation > 0 and hierarchical:
+                spec = spec[rotation:] + spec[:rotation]
             #print('spec = ', spec)
             currPS = self
             outSpec = []
@@ -607,8 +777,14 @@ class ProbSpace:
                 # Use resulting conditional space of this variable for the sample
                 # of the next one.  That way, we sample using the mean and std
                 # of the variable in the conditioned space of the previous vars.
-                if s != len(spec) - 1:
-                    currPS = currPS.SubSpace([varSpec], maxPoints=currPS.N)
+                if s != len(spec) - 1 and hierarchical:
+                    minPoints = currPS.N**p
+                    maxPoints = minPoints * 5
+                    #print('N, minPoints, maxPoints = ', currPS.N, minPoints, maxPoints)
+                    currPS = currPS.SubSpace([varSpec], minPoints=minPoints, maxPoints=maxPoints)
+            # Only need to rotate if doing hierarchical
+            if hierarchical:
+                rotation = (rotation + 1) % len(condVars)
             #print('outSpec = ', outSpec)
             outCS.append(outSpec)
         #print('outCS = ', outCS)
@@ -700,11 +876,14 @@ class ProbSpace:
         # For level = 3, we test the mean + 6 more values.
 
         # Separate the givens into bound (e.g. B=1, 1 <= B < 2) and unbound (e.g., B) specifications.
+        totalDepth = len(givensSpec) + 1
+        p = self.reductionExponent(totalDepth)
+        #print('p =', p)
         givensU, givensB = self.separateSpecs(givensSpec)
         if not givensU:
             condFiltSpecs = [None]
         else:
-            condFiltSpecs = self.getCondSpecs(givensU, power)
+            condFiltSpecs = self.getCondSpecs(givensU, power, reductionExp=p)    
         prevGivens = None
         prevProb1 = None
         numTests = 0
@@ -713,14 +892,18 @@ class ProbSpace:
             # givens is conditional on spec without rv2
             #print('spec = ', spec)
             if spec is None: # Unconditional Independence
-                ss1 = self.SubSpace(givensB)
+                minPoints = self.N**(p**len(givensB))
+                maxPoints = minPoints * 5
+                ss1 = self.SubSpace(givensB, minPoints=minPoints, maxPoints=maxPoints)
                 prob1 = ss1.distr(rv1)
             else:
                 givens = spec
                 if givens != prevGivens:
                     # Only recompute prob 1 when givensValues change
                     # Get a subsapce filtered by all givens, but not rv2
-                    ss1 = self.SubSpace(givens + givensB)
+                    minPoints = self.N**(p**(len(givensB)+len(givens)))
+                    maxPoints = minPoints * 5
+                    ss1 = self.SubSpace(givens + givensB, minPoints=minPoints, maxPoints=maxPoints)
                     prob1 = ss1.distr(rv1)
                     prevProb1 = prob1
                     prevGivens = givens
@@ -734,9 +917,9 @@ class ProbSpace:
             for testSpec in testSpecs:
                 # prob2 is the conditional subspace of everything but rv2
                 # conditioned on rv2
-                #ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N, discSpecs = self.discSpecs)
-                #ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N)
-                ss2 = ss1.SubSpace(testSpec, minPoints = 100, maxPoints = ss1.N/2)
+                minPoints = ss1.N**(p)
+                maxPoints = minPoints * 5
+                ss2 = ss1.SubSpace(testSpec, minPoints=minPoints, maxPoints=maxPoints)
                 prob2 = ss2.distr(rv1)
                 if prob2.N == 0:
                     continue
@@ -750,6 +933,7 @@ class ProbSpace:
                 if DEBUG:
                     print('spec = ', spec, testSpec, ', givensB = ', givensB, ', dep = ', dep, ', prob1.N, prob2.N = ', prob1.N, prob2.N)
                     print('ss1.parentQuery = ', ss1.parentQuery, ', ss2.parentQuery = ', ss2.parentQuery)
+            #print('ss1.N, ss2.N = ', ss1.N, ss2.N)
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
             dependence = accum / accumProb
@@ -807,7 +991,7 @@ class ProbSpace:
             Returns True if independent, otherwise False
         """
         ind = self.independence(rv1, rv2, givensSpec = givensSpec, power = power)
-        # Use .1 (90% confidence as threshold.
+        # Use .5 (50% confidence as threshold.
         return ind > .5
 
     def jointValues(self, rvList):

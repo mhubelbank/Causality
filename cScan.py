@@ -44,26 +44,10 @@ g = cGraph.cGraph(gnodes, data)
 exos = g.findExogenous()
 print()
 print('Exogenous variables = ', exos)
-print()
-deps = g.computeDependencies(2)
-g.printDependencies(deps)
+cvMap = g.findChildVars(exos)
+print('CVMap = \n', cvMap)
 print()
 
-results = g.TestModel(order = 2)
-
-conf, numTests, numTestsByType, numErrsByType, errors, warnings = results
-
-print()
-print('Confidence = ', conf)
-print('Number of Tests = ', numTests)
-print('Number of Tests by Type = ', numTestsByType)
-print('Number of Errs by Type = ', numErrsByType)
-print('Total Errors = ', len(errors))
-print('Total Warnings = ', len(warnings))
-print()
-print('Error Details = ', errors)
-print()
-print('Warning Details = ', warnings)
 print()
 
 end = time.time()

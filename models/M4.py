@@ -23,10 +23,10 @@ model =    [('B', []),
 # Structural Equation Model for data generation
 varEquations = [
 			    #'B = math.sin((t % 365) / 365 * 6.28) * 50 + 40 + logistic(0, 5)',
-                'B = logistic(3, 5)',
-			    'A = 1 * B + logistic(0,5)',
-                'D = .5 * A + logistic(0,5)',
-			    'C = 1.5 * A + 1 * B + 1 * D + normal(0, 5)',
+                'B = logistic(0,1)',
+			    'A = 1 * B + logistic(0, 1)',
+                'D = .5 * A + logistic(0, 1)',
+			    'C = 1.5 * A + 1 * B + 1 * D + logistic(0, 1)',
                 't = t + 1'
 		        ]
 				
