@@ -39,7 +39,6 @@ def run(semFileName, samples=1000, maxDifficulty=0, reset=False):
     # For out file, use the input file name with the .csv extension
     if maxDifficulty:
         MAX_DIFFICULTY = maxDifficulty
-    print('MAX_DIFFICULTY = ', MAX_DIFFICULTY)
     tokens = semFileName.split('.')
     outFileRoot = str.join('.',tokens[:-1])
     outFileName = outFileRoot + '.csv'
@@ -47,12 +46,17 @@ def run(semFileName, samples=1000, maxDifficulty=0, reset=False):
     varNames = []
     for rv in model:
         observed = True
-        if len(rv) >= 2:
-            name, parents = rv[:2]
-        if len(rv) >= 3:
-            observed = rv[2]
-        if len(rv) >= 4:
-            datType = rv[3]
+        if type(rv) == type((1,)):
+            if len(rv) >= 2:
+                name, parents = rv[:2]
+            if len(rv) >= 3:
+                observed = rv[2]
+            if len(rv) >= 4:
+                datType = rv[3]
+        else:
+            # Just a list of var names.  No model.
+            name = rv
+            parents = []
         if observed:
             varNames.append(name)
     success = False
@@ -101,24 +105,6 @@ def run(semFileName, samples=1000, maxDifficulty=0, reset=False):
         f.writelines(outLines)
         f.close()
         success = True
-        # if maxDifficulty == 0 or not reset:
-        # 	success = True 
-        # else:
-        # 	difficulty = determineDifficulty(outFileRoot,samples)
-        # 	if difficulty <= maxDifficulty:
-        # 		if difficulty <= maxDifficulty / 2.0:
-        # 			#print('Failed: difficulty = ', difficulty, ', maxDiff = ', maxDifficulty)
-        # 			increaseRange()
-        # 			reset = True
-        # 			success = False
-        # 		else:
-        # 			#print('Success: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
-        # 			success = True
-        # 	else:
-        # 		#print('Failed: difficulty2 = ', difficulty, ', maxDiff = ', maxDifficulty)
-        # 		decreaseRange()
-        # 		reset = True
-        # 		success = False
     return outFileName
 
 def determineDifficulty(fileName, samples):
@@ -145,32 +131,33 @@ def decreaseRange():
 	return
 	
 def getSEM():
-	global NOISE_COUNT, COEF_COUNT
-	NOISE_COUNT = 0
-	COEF_COUNT = 0
-	outEquations = []
-	for equation in RAW_EQUATIONS:
-		equation = "'" + equation + "',"
-		while equation.find('data()') >= 0:
-			equation = equation.replace('data()', str(DATA_OFFSET) + ' + ' + NOISES[NOISE_COUNT],1)
-			temp = noise() # to increment the NOISE_COUNT
-		while equation.find('coef()') >= 0:
-			coefVal = coef()
-			equation = equation.replace('coef()',str(coefVal),1)
-		while equation.find('noise()') >= 0:
-			equation = equation.replace('noise()', NOISES[NOISE_COUNT],1)
-			temp = noise() # to increment the NOISE_COUNT
-		outEquations.append(equation)
-	if largestCoef > 0 or largestStd > 0:
-		outEquations.append('Stats:')
-		coefRange = largestCoef / float(smallestCoef)
-		stdRange = largestStd / float(smallestStd)
-		totalRange = coefRange * stdRange
-		outEquations.append('  Coef Range = ' + str(coefRange))
-		outEquations.append('  Std Range = ' +str(stdRange))
-		outEquations.append('  Total Scale Range = ' + str(totalRange))
-	outStr = str.join('\n', outEquations)
-	return outStr
+    global NOISE_COUNT, COEF_COUNT
+    NOISE_COUNT = 0
+    COEF_COUNT = 0
+    outEquations = []
+    for equation in RAW_EQUATIONS:
+        equation = "'" + equation + "',"
+        while equation.find('data()') >= 0:
+            equation = equation.replace('data()', str(DATA_OFFSET) + ' + ' + NOISES[NOISE_COUNT],1)
+            temp = noise() # to increment the NOISE_COUNT
+        while equation.find('coef()') >= 0:
+            coefVal = coef()
+            equation = equation.replace('coef()',str(coefVal),1)
+        while equation.find('noise()') >= 0:
+            equation = equation.replace('noise()', NOISES[NOISE_COUNT],1)
+            temp = noise() # to increment the NOISE_COUNT
+        outEquations.append(equation)
+    if largestCoef > 0 or largestStd > 0:
+        outEquations.append('Stats:')
+        coefRange = largestCoef / float(smallestCoef)
+        stdRange = largestStd / float(smallestStd)
+        totalRange = coefRange * stdRange
+        outEquations.append('  Coef Range = ' + str(coefRange))
+        outEquations.append('  Std Range = ' +str(stdRange))
+        outEquations.append('  Total Scale Range = ' + str(totalRange))
+    outStr = '\n' + str.join('\n', outEquations) + '\n'
+    #print(outEquations, outStr)
+    return outStr
 	
 #DISTRS = ['logistic']
 #DISTRS = ['logistic', 'lognormal', 'laplace','gumbel']
@@ -252,10 +239,10 @@ if __name__ == '__main__':
 	else:
 		datacount = 1000
 	print('Generating data for model = ', filename)
-	print ('SEM = ', getSEM())
 	#print('filename, datacount = ', filename, datacount)
 	if filename is not None:
 		run(filename, samples=datacount, maxDifficulty=0)
+	print ('SEM = ', getSEM())
 	print('Generated ', datacount, 'records.')
 
 	

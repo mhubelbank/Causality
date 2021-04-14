@@ -347,19 +347,52 @@ class cGraph:
             results.append((isError, x, y, rho))
         return results
 
+    def causalOrder(self):
+        cOrder = []
+        while len(cOrder) < len(self.rvList):
+            exos = self.findExogenous(exclude=cOrder)
+            cOrder += exos
+        while 1:
+            correct = True
+            for i in range(2, len(cOrder)):
+                lowestDep = 2.0
+                bestParent = None
+                var1 = cOrder[i]
+                var2 = cOrder[0]
+                for j in range(len(cOrder)):
+                    var3 = cOrder[j]
+                    if var3 == var1 or var3 == var2:
+                        continue
+                    dep = self.iProb.dependence(var1, var2, var3)
+                    #print('dep', var1, var2, var3, '=', dep)
+                    if dep < lowestDep:
+                        lowestDep = dep
+                        bestParent = var3
+                if cOrder[i-1] != bestParent:
+                    #print('Best parent for', var1, 'is', bestParent, '.  Current is', cOrder[i-1])
+                    cOrder.remove(bestParent)
+                    cOrder.insert(i, bestParent)
+                    correct = False
+                    break
+            if correct:
+                break
+        return cOrder
 
-    def findExogenous(self):
-        rvList = list(self.rvList)
+    def findExogenous(self, exclude=[]):
+        rvList = self.rvList
         rvList.sort()
         accum = {}
         for v in rvList:
-            accum[v] = 0.0
+            if v not in exclude:
+                accum[v] = 0.0
         numVars = len(rvList)
         for i in range(numVars):
             x = rvList[i]
+            if x in exclude:
+                continue
             for j in range(i+1, numVars):
                 y = rvList[j]
-                if x == y:
+                if x == y or y in exclude:
                     continue
                 R = direction.direction(self.data[x], self.data[y])
 

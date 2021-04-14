@@ -456,6 +456,7 @@ class PDF:
         #print('ranges =', len(ranges), ranges)
         N1 = self.N
         N2 = other.N
+        minN = min([N1, N2])
         cdf1 = 0.0
         cdf2 = 0.0
         diffs = []
@@ -481,7 +482,8 @@ class PDF:
         # that self and other were not drawn from the same distribution.
         # This is an inversion of the usual use of KS where comparing D to
         # an alpha based threshold.
-        alpha = 2 * e**(-2 *(ks/sqrt((N1+N2)/ (N1*N2)))**2)
+        #alpha = 2 * e**(-2 *(ks/sqrt((N1+N2)/ (N1*N2)))**2)
+        alpha = 2 * e**(-2 *(ks/sqrt((2*minN)/ (minN*minN)))**2)
         #print('N1, N2, D, alpha = ', N1, N2, ks, alpha)
         return max([0, 1-alpha])
 
