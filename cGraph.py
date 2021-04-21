@@ -348,11 +348,12 @@ class cGraph:
         return results
 
     def causalOrder(self):
+        maxTries = 10
         cOrder = []
         while len(cOrder) < len(self.rvList):
             exos = self.findExogenous(exclude=cOrder)
             cOrder += exos
-        while 1:
+        for attempt in range(maxTries):
             correct = True
             for i in range(2, len(cOrder)):
                 lowestDep = 2.0
@@ -363,7 +364,7 @@ class cGraph:
                     var3 = cOrder[j]
                     if var3 == var1 or var3 == var2:
                         continue
-                    dep = self.iProb.dependence(var1, var2, var3)
+                    dep = self.iProb.dependence(var1, var2, var3, raw=True)
                     #print('dep', var1, var2, var3, '=', dep)
                     if dep < lowestDep:
                         lowestDep = dep
@@ -376,6 +377,8 @@ class cGraph:
                     break
             if correct:
                 break
+        if not correct:
+            print('cGraph.causalOrder: Could not converge to a definite order.')
         return cOrder
 
     def findExogenous(self, exclude=[]):

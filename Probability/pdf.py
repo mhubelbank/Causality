@@ -436,7 +436,7 @@ class PDF:
                 # hypothesis of independece is rejected.
     ksThreshold = sqrt(-log(ksAlpha/2) * .5) # Threshold for the ksTest
 
-    def compare(self, other):
+    def compare(self, other, raw=False):
         # Kolmogorov-Smirnov Statistic
         if self.isDiscrete:
             testRanges = self.binCount
@@ -477,6 +477,15 @@ class PDF:
             diff = abs(cdf1 - cdf2)
             diffs.append(diff)
         ks = max(diffs)
+        if raw:
+            #mean1 = self.mean()
+            #mean2 = other.mean()
+            #meanDiff = abs(mean1-mean2)
+            #std1 = self.stDev()
+            #std2 = other.stDev()
+            #stdDiff = abs(std1-std2)
+            #return ks + meanDiff + stdDiff
+            return ks
         # Now, convert the raw KS statistic (i.e. D(m,n)) to an alpha
         # value, where alpha := P(self != other).  That is, the probability
         # that self and other were not drawn from the same distribution.

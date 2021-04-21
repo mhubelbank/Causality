@@ -859,7 +859,7 @@ class ProbSpace:
         #print('old = ', spec, ', new =', outSpec, ', delta = ', deltaAdjust)
         return outSpec
 
-    def dependence(self, rv1, rv2, givensSpec=[], power = None):
+    def dependence(self, rv1, rv2, givensSpec=[], power=None, raw=False):
         """ givens is [given1, given2, ... , givenN]
         """
         if power is None:
@@ -923,7 +923,7 @@ class ProbSpace:
                 prob2 = ss2.distr(rv1)
                 if prob2.N == 0:
                     continue
-                dep = prob1.compare(prob2)
+                dep = prob1.compare(prob2, raw=raw)
                 # We accumulate any measured dependency multiplied by the probability of the conditional
                 # clause.  This way, we weight the dependency by the frequency of the event.
                 condProb = prob2.N / self.N
@@ -937,9 +937,10 @@ class ProbSpace:
         if accumProb > 0.0:
             # Normalize the results for the probability space sampled by dividing by accumProb
             dependence = accum / accumProb
-        # Bound it to [0, 1] 
-        dependence = max([min([dependence, 1]), 0])
-        return dependence
+            if not raw:
+                # Bound it to [0, 1] 
+                dependence = max([min([dependence, 1]), 0])
+            return dependence
             #H = .36845
             #L = .0272
             #if dependence < L:
