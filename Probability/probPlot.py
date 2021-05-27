@@ -28,11 +28,17 @@ gnodes = []
 for var in model:
     observed = True
     dType = 'Numeric'
-    name, parents = var[:2]
-    if len(var) >= 3:
-        observed = var[2]
-    if len(var) >= 4:
-        dType = var[3]
+    if type(var) == type((1,)):
+        name, parents = var[:2]
+        if len(var) >= 3:
+            observed = var[2]
+        if len(var) >= 4:
+            dType = var[3]
+    else:
+        name = var
+        parents = []
+        observed = True
+        dType = 'Numeric'
     gnode = rv.rv(name, parents, observed, dType, None, None)
     gnodes.append(gnode)
 

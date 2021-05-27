@@ -168,7 +168,7 @@ class Scanner:
             for exo in exos:
                 # Check all potential indirect parents, and find the most likely
                 bestParent = None
-                hightestDep = 0.0
+                highestDep = 0.0
                 exoClusters = []
                 for pc in potentialParents:
                     if exo not in self.getClusterExos(pc):
@@ -178,10 +178,10 @@ class Scanner:
                 for p in parentVars:
                     dep = self.g.iProb.dependence(headVar, p, raw=True, power=PWR)
                     print('dep(', headVar, p, ') = ', dep)
-                    if dep > hightestDep:
+                    if dep > highestDep:
                         # The node that blocks the most dependence from headVar to exo
                         # is the best indirect parent.
-                        hightestDep = dep
+                        highestDep = dep
                         bestParent = p
                 print('best parent for ', headVar, '->', exo, '=', bestParent)
                 parents.append(bestParent)
@@ -190,8 +190,7 @@ class Scanner:
                 parentLinks.append((parent, headVar))
         return parentLinks
 
-
-    def Scan(self, testName):
+    def Scan(self):
         g = self.g
         print('Testing: ', test, '--', testDescript)
         print()
@@ -323,4 +322,4 @@ if __name__ == '__main__':
     if (len(args) > 1):
         test = args[1]
         s = Scanner(test)
-        s.Scan(test)
+        s.Scan()
