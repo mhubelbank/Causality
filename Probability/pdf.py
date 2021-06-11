@@ -168,10 +168,6 @@ class PDF:
             for i in range(self.binCount):
                 bin = self.bins[i]
                 id, min, max, prob = bin
-                if self.isDiscrete:
-                    value = min
-                else:
-                    value = (min + max) / 2.0
                 value = self.binValue(i)
                 cum += prob * value
             self.meanCache = cum

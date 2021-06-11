@@ -444,8 +444,8 @@ class cGraph:
 
     def intervene(self, targetRV, doList, controlFor = [], power=1):
         """ Implements Intverventions (Level2 of Ladder of Causality)
-            of the form P(Y | do(X1=x1)).  That is, the Probability
-            of Y given that we set X1 to x1.  This is generalized
+            of the form P(Y | do(X1=x1),Z).  That is, the Probability
+            of Y given that we set X1 to x1 and control for Z.  This is generalized
             to allow multiple interventions on different variables.
             doList is the set of interventions: [(varName1, val1), ..., (varNamek, valk)].
             We return a probability distribution that can be further queried,
@@ -462,7 +462,7 @@ class cGraph:
                 doListF.append(item)
         if not doListF:
             # No causal effects.  Return P(target)
-            return self.prob.distr(targetRV)
+            return self.prob.distr(targetRV, controlFor)
 
         # Find all the backdoor paths and identify the minimum set of variables (Z) that
         # block all such paths without opening any new paths.
@@ -542,7 +542,7 @@ class cGraph:
             if d == source:
                 return False
             return True
-
+backdoorSet
         pathNodes = {}
         vg = networkx.subgraph_view(self.g, filter_edge=includeEdge)
         for parent in parents:
