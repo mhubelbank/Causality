@@ -27,7 +27,7 @@ class Counterfactual:
         """
 
         pass
-    
+
     def deterministic(self, cf, rv_list=[]):
         """Computes a deterministic query at the unit-level.
         A SEM is required, as it represents the mechanism by which each variable obtains its value.
