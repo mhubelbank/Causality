@@ -453,7 +453,7 @@ class cGraph:
             (see Probability/Prob.py and pdf.py)
         """
         # Filter out any interventions for which the target is not a descendant of the
-        # intevening variable.  The effect of those interventions will alsways be zero.
+        # intevening variable.  The effect of those interventions will always be zero.
         doListF = []
         for item in doList:
             rv, value = item
@@ -542,7 +542,7 @@ class cGraph:
             if d == source:
                 return False
             return True
-backdoorSet
+
         pathNodes = {}
         vg = networkx.subgraph_view(self.g, filter_edge=includeEdge)
         for parent in parents:
@@ -644,4 +644,3 @@ backdoorSet
         print('FDblocking = ', bSet)
         self.fdCache[cacheKey] = bSet
         return bSet
-

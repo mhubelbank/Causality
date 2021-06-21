@@ -1147,7 +1147,7 @@ class ProbSpace:
             else:
                 vars.append(dep[1])
         #print('vars = ', vars)
-        # Vars now contains all the variables that are not indpendent from Y, sorted in
+        # Vars now contains all the variables that are not independent from Y, sorted in
         # order of highest dependence.
 
         # Get the number of items to predict:
