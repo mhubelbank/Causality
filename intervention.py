@@ -7,9 +7,10 @@ from cGraph import cGraph
 class Intervention():
     def __init__(self, rvList, data):
         self.cGraph = cGraph(rvList, data)
+        self.prob = self.cGraph.prob
 
     def intervene(self, targetRV, doList, controlFor = [], power=1):
-        """ Implements Intverventions (Level2 of Ladder of Causality)
+        """ Implements Intverventions (Level 2 of Ladder of Causality)
             of the form P(Y | do(X1=x1),Z).  That is, the Probability
             of Y given that we set X1 to x1 and control for Z.  This is generalized
             to allow multiple interventions on different variables.
@@ -19,7 +20,7 @@ class Intervention():
             (see Probability/Prob.py and pdf.py)
         """
         # Filter out any interventions for which the target is not a descendant of the
-        # intevening variable.  The effect of those interventions will always be zero.
+        # intervening variable.  The effect of those interventions will always be zero.
         doListF = []
         for item in doList:
             rv, value = item
@@ -32,7 +33,7 @@ class Intervention():
 
         # Find all the backdoor paths and identify the minimum set of variables (Z) that
         # block all such paths without opening any new paths.
-        blockingSet = self.findBackdoorBlockingSet(doListF[0][0], targetRV)
+        blockingSet = self.cGraph.findBackdoorBlockingSet(doListF[0][0], targetRV)
         # Now we compute the probability distribution of Y conditionalized on all of the blocking
         # variables.
         given = doList + blockingSet + controlFor
