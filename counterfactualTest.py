@@ -41,6 +41,24 @@ print(cf.cf(sally, 'R', ('S', 3), pdf))
 print(cf.cf(sally, 'R', ('S', 2), pdf))
 print(cf.cf(sally, 'R', ('S', 1), pdf))
 
+# joe = [('X', 0.5), ('H', 1), ('Y', 1.5)]
+# print(cf.deterministic(joe, 'Y', ('H', 2)))
+
+# python counterfactualTest.py models/cfTestCW.py True
+# python counterfactualTest.py models/cfTestDet.py
+
 # sally_d = {'G': 0, 'H': 61, 'W': 110, 'S': 4, 'B': 22.78, 'T': 1, 'BR': 0.019, 'R': 0}
 # print(cf.cf_closest_worlds(sally_d, ('S', 2), 'R'))
 
+
+# from random import uniform
+# import random
+# random.seed(10)
+# import math
+#
+# data = dict([('G', 0), ('H', 61), ('W', 110), ('S', 4), ('B', 22.78), ('T', 1), ('BR', 0.019), ('R', 0)])
+#
+# print(int((uniform(0,1) < (.9 -  data['BR'])/(1+math.log(data['S']))) if data['T'] else (uniform(0,1) <  (.5 - data['BR'])/(1+math.log(data['S'])))))
+#
+# # with cf:
+# print(int((uniform(0,1) < (.9 -  data['BR'])/(1+math.log(2))) if data['T'] else (uniform(0,1) <  (.5 - data['BR'])/(1+math.log(2)))))

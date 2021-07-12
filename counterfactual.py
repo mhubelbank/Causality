@@ -1,10 +1,15 @@
-import math
 from mpmath import mp
 import pandas as pd
 import numpy as np
 from sklearn import metrics
 from numpy.linalg import norm
 import re
+from numpy.random import normal
+np.random.seed(1)
+import random
+random.seed(1)
+from random import uniform
+import math
 
 from intervention import Intervention
 
@@ -24,6 +29,7 @@ class Counterfactual:
         self.prob = self.cGraph.prob
         self.model = model
         self.sem = sem  # The SEM is a list of equations, structured the same as in the model files
+        self.sem_dict = self.set_sem_dict()
 
     def cf(self, X, Y, cf, pdf=False, conditional=None):
         """Generates a distribution prediction of the target RV (Y) based on the counterfactual query and conditional
@@ -137,32 +143,22 @@ class Counterfactual:
 
         return df_with_sim
 
-    def deterministic(self, unit, cf, target_rv):
+    def deterministic(self, X, Y, cf):
         """Computes a deterministic query at the unit-level.
-        A SEM is required, as it represents the mechanism by which each variable obtains its value.
-        Pertains to a single unit of the population in which we know the value of every relevant variables.
+        A Linear SEM is required, as it represents the mechanism by which each variable obtains its value.
+        Pertains to a single unit of the population in which we know the value of every relevant variable.
 
+        :param X:
+        :param Y: an RV target to output (the consequent); a String (RV name)
+            Ex. "What "What would Y be if X were 1?" -> target_rv = "Y"
         :param cf: the counterfactual(s) to be computed; a tuple
             Ex. "What would Y be if X were 1?" -> cf = ("X", 1)
-        :param target_rv: an RV target to output (the consequent); a String (RV name)
-            Ex. "What "What would Y be if X were 1?" -> target_rv = "Y"
             TODO If empty, all RVs in the model are computed using the numpy and the SEM's system of linear equations.
         :return:
         """
-        self.make_sem()  # Need a fully specified SEM
         u_sem = self.make_u_sem()
-
+        return self.solve_u_sem_with_cf(u_sem, dict(X), Y, cf)
         # TODO Check invertibility -- have a method in the SEM class for this ?
-
-        # 1. Use evidence (self.data) to determine the value of U_v for each RV v in the SEM.
-
-        # 2. Modify the model, M, by removing the structural equations for the variables in X and replacing them with
-        # the appropriate functions X=x, to obtain the modified model, M_x.
-
-        # 3. Use the modified model M_x and the value of U to compute the value of Y (consequence of counterfactual).
-        # Use numpy to solve system of linear equations?
-
-        pass
 
     # Useful for non-invertible unit-level counterfactual queries.
     # u_space: Probability space for exogenous "Universe" variables U. Provides nondeterminism; "represent[s] our
@@ -173,6 +169,15 @@ class Counterfactual:
         self.check_u(u_space)
         pass
 
+    def set_sem_dict(self):
+        sem_dict = {}
+        for var_eq in self.sem:
+            var_eq = var_eq.strip()
+            span = (re.search(' = ', var_eq)).span()
+            var, eq = var_eq[:span[0]], var_eq[span[1]:]
+            sem_dict[var] = eq
+        return sem_dict
+
     # Returns a SEM modified to include U-vars (unit)
     # X = U_X
     # H = aX + U_H
@@ -180,34 +185,40 @@ class Counterfactual:
     def make_u_sem(self):
         u_sem = {}
         for rv in self.rv_list:
-            eq = rv.forwardFunc
             if len(rv.parentNames) == 0:  # If exogenous, U_X = X
-                u_sem[rv.name] = rv.name
+                u_sem[rv.name] = ' ' + rv.name
             else:  # If endogenous, U_X = X - F(X)
-                rhs = eq[(re.search(' = ', eq)).span()[1]:]
-                u_sem[rv.name] = rv.name + ' - ' + rhs
+                u_sem[rv.name] = ' ' + rv.name + ' - (' + self.sem_dict[rv.name] + ')'
         return u_sem
 
-    def solve_u_sem_with_cf(self, u_sem, unit, cf, target_rv):
+    # 1. Use evidence (self.data) to determine the value of U_v for each RV v in the SEM.
+    # 2. Modify the model, M, by removing the structural equations for the variables in X and replacing them with
+    # the appropriate functions X=x, to obtain the modified model, M_x.
+    # 3. Use the modified model M_x and the value of U to compute the value of Y (consequence of counterfactual).
+    def solve_u_sem_with_cf(self, u_sem, x_dict, Y, cf):
         u_sem_solved = {}
         # Replace each RV in each equation with its observed value
         for rv, eq in u_sem.items():  # For each RV equation in the U-SEM
-            def pad(s):
-                return ' ' + s + ' '  # Pad to ensure that substrings containing this RV name are skipped
-
+            def pad(s): return ' ' + s  # Pad to ensure that substrings containing this RV name are skipped
             for rv_term in u_sem.keys():  # For each RV term in this equation
-                eq = eq.replace(pad(rv_term), pad(unit[rv_term]))  # Replace the RV term with its observed value
-            u_sem_solved[rv] = exec(eq)
+                eq = re.sub(rf'{rv_term}(?![A-Za-z0-9])', str(x_dict[rv_term]), eq)
+            print('U_'+rv+' =' + eq)
+            u_sem_solved[rv] = eval(eq)
+
+        print(u_sem_solved)
 
         # Now that we have all the U-terms, we can solve for the target RV using the given counterfactual
-        eq_target = self.sem[target_rv] + ' + ' + u_sem_solved[target_rv]  # X = F(X) + U_X
+        eq_target = str(self.sem_dict[Y]) + ' + ' + str(u_sem_solved[Y])  # X = F(X) + U_X
         for rv_term in u_sem.keys():
             if rv_term == cf[0]:
-                eq_target = eq_target.replace(pad(rv_term), pad(cf[1]))
+                # eq_target = eq_target.replace(pad(rv_term), pad(str(cf[1])))
+                eq_target = re.sub(rf'{rv_term}(?![A-Za-z0-9])', str(cf[1]), eq_target)
             else:
-                eq_target = eq_target.replace(pad(rv_term), pad(unit[rv_term]))
+                # eq_target = eq_target.replace(pad(rv_term), pad(str(x_dict[rv_term])))
+                eq_target = re.sub(rf'{rv_term}(?![A-Za-z0-9])', str(x_dict[rv_term]), eq_target)
 
-        return exec(eq_target)
+        print(eq_target)
+        return eval(eq_target)
 
     def check_u(self, u_space=None):
         if u_space is None:
