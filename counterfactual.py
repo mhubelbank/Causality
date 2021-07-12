@@ -1,12 +1,12 @@
-from intervention import Intervention
 import math
+from mpmath import mp
 import pandas as pd
 import numpy as np
 from sklearn import metrics
-from sklearn import preprocessing
-from scipy import spatial
-from numpy import dot
 from numpy.linalg import norm
+import re
+
+from intervention import Intervention
 
 
 class Counterfactual:
@@ -16,124 +16,145 @@ class Counterfactual:
 
     # rv_list: A list of random variable (rv) objects; is a SEM if fully specified.
     # data: The evidence/"reality"; a dictionary keyed by random variable name mapped to observed values.
-    def __init__(self, rv_list, data):
+    def __init__(self, rv_list, data, model=None, sem=None):
         self.rv_list = rv_list
         self.data = data
         self.int = Intervention(rv_list, data)
         self.cGraph = self.int.cGraph
         self.prob = self.cGraph.prob
-        self.is_sem = self.set_sem()
+        self.model = model
+        self.sem = sem  # The SEM is a list of equations, structured the same as in the model files
 
-    def cf_closest_worlds(self, unit, cf, target_rv, conditional=None, power=1):
-        """Finds the "closest world" to the given unit in which the given counterfactual(s) hold.
+    def cf(self, X, Y, cf, pdf=False, conditional=None):
+        """Generates a distribution prediction of the target RV (Y) based on the counterfactual query and conditional
+            clause, using the given unit observation (X) to find the "closest worlds" which will restrict the dataset
 
-        :param unit: an observation that we wish to perform counterfactual queries on; a dictionary
+        :param X: an observation that we wish to perform counterfactual queries on; a list of tuples
+                        NOTE: All exogenous variables must be specified.
+        :param Y: an RV target to output (the consequent); a String (RV name)
         :param cf: the counterfactual to apply; a tuple
-        :param conditional:
-        :param target_rv: an RV target to output; the consequent
-        :param power:
+        :param conditional: conditional clause -- the dataset features to be used in finding the closest worlds; a list
         :return:
         """
-        if unit.keys() != self.data.keys():
-            raise Exception("Invalid unit observation entered.")
+        X = X.copy()
+        x_dict = dict(X)
+        y_obs = (Y, x_dict[Y])
+        if Y in x_dict.keys():
+            X.remove(y_obs)
 
-        if conditional is None:
-            # then we condition on all variables except cf, target_rv
-            conditional = [rv_name for rv_name in unit.keys()
-                           if rv_name != cf[0] and rv_name != target_rv]
+        # vars will contain all the RVs that are not independent from Y, sorted in descending order of dependence with Y
+        deps = [(self.prob.dependence(rv[0], Y, power=3), rv[0]) for rv in X]
+        deps.sort(reverse=True)
+        vars = []
+        for i in range(len(deps)):
+            dep = deps[i]
+            if dep[0] < .5:
+                print('Rejecting variables due to independence from target(p-value, var): ', deps[i:])
+                break
+            else:
+                vars.append(dep[1])
 
-        # TODO sort conditional clause -- ascending order of independence from cf?
+        # Compute the SubSpace with filters based on given X with counterfactual clause replacement and Y removed
+        filts = vars.copy()
+        for index, rv in enumerate(filts):
+            if rv == cf[0]:
+                filts[index] = (rv, cf[1])
+            else:
+                filts[index] = (rv, x_dict[rv])
+        fs = self.prob.SubSpace(filts, minPoints=10, maxPoints=0.001 * self.prob.N)
+        # TODO include a check here for cf clause of each observation (delete obs if not cf)
 
-        df_worlds = self.find_closest_worlds(unit, cf, conditional)
-        data_worlds = df_worlds.to_dict('list')  # convert the closest_worlds dataframe to a data dictionary
+        df = pd.DataFrame.from_dict(fs.ds)
+        df_sim = self.find_similarity_scores(x_dict, Y, cf, df, list(reversed(vars)))
 
-        print(data_worlds)
+        out = '\nE_weighted(' + str(Y) + ') with cf ' + str(cf[0]) + '=' + str(cf[1]) + ': ' + str(df_sim[Y + "_wsim"].sum())
+        if pdf:
+            dist = fs.distr(Y)
+            out += '\nPDF Results (Unweighted):'
+            out += '\nE = ' + str(dist.E())
+            out += '\nSt Dev = ' + str(dist.stDev())
+            out += '\nSkew = ' + str(dist.skew())
+            out += '\nKurtosis = ' + str(dist.kurtosis())
 
-    def find_closest_worlds(self, unit, cf, conditional_rv):
-        # Restrict the dataset based on the conditional clause -- find the k closest worlds (1%)
-        num_obs = len(self.data[list(self.data)[0]])
-        k = int(round(.01 * num_obs))
+        return out
 
-        df = pd.DataFrame.from_dict(self.data)
+    def find_similarity_scores(self, x_dict, Y, cf, df, vars_sorted):
+        score_cols = [col for col in df.columns if (col != cf[0] and col != Y)]
+        cols_disc, cols_cont = [], []
+        [cols_disc.append(col) if self.prob.isDiscrete(col) else cols_cont.append(col) for col in score_cols]
+        df_disc, df_cont = df[cols_disc].copy(), df[cols_cont].copy()
+        x_disc = np.array([v for k, v in x_dict.items() if k in cols_disc]).flatten()
+        x_cont = np.array([v for k, v in x_dict.items() if k in cols_cont]).flatten()
 
-        df_obs = df[df[cf[0]] == cf[1]]  # Conditionalize on the counterfactual
-        df_obs = df_obs[conditional_rv].copy()  # Filter columns on the given cond clauses
-        k = min(k, len(df_obs))
-
-        # Filter the unit observation to also include only conditional columns
-        unit_cond = {}
-        for rv_name, rv_val in unit.items():
-            if rv_name in conditional_rv:
-                unit_cond[rv_name] = rv_val
-
-        # Split the dataset into continuous and discrete vars
-        cols_disc = []
-        cols_cont = []
-        [cols_disc.append(col) if self.prob.isDiscrete(col) else cols_cont.append(col) for col in df_obs.columns]
-
-        df_disc = df_obs[cols_disc].copy()
-        unit_disc = {k: v for k, v in unit_cond.items() if k in cols_disc}
-        unit_disc = np.array(list(unit_disc.values())).flatten()
-
-        df_cont = df_obs[cols_cont].copy()
-        unit_cont = {k: v for k, v in unit_cond.items() if k in cols_cont}
-        unit_cont = np.array(list(unit_cont.values())).flatten()
-
+        # Use the Jaccard coefficient for discrete variables
         def jac_coeff(row_disc):
             row = row_disc.to_numpy().reshape(-1, 1).flatten()
-            jac = metrics.jaccard_score(row, unit_disc, zero_division=1.0, average='weighted')
-            print('JAC / row:', row, 'vs unit:', unit_disc, ':', jac)
+            jac = metrics.jaccard_score(row, x_disc, zero_division=1.0, average='weighted')
+            # print('JAC / row:', row, 'vs unit:', x_disc, ':', jac)
             return jac
 
-        def euc_dis(row_cont):
+        # Use a Euclidean distance transformation for continuous variables
+        def euc_dist(row_cont):
             row = row_cont.to_numpy().flatten()
-            euc = np.linalg.norm(row - unit_cont)
-            sim = 1 / math.exp(euc)  # src: https://tinyurl.com/5dfmyh3e
-            print('EUC / row:', row, 'vs unit:', unit_cont, ':', sim)
+            euc = np.linalg.norm(row - x_cont)
+            sim = 1 / mp.exp(euc)  # src: https://tinyurl.com/5dfmyh3e
+            # print('EUC / row:', row, 'vs unit:', x_cont, ':', round(sim, 5))
             return sim
-            # cos = 1 - spatial.distance.cosine(row, unit_cont)
-            # print('COS / row:', row, 'vs unit:', unit_cont, ':', cos)
-            # return cos
-
-        euc_dists = df_cont.apply(euc_dis, axis=1)
-        df_cont_dist = pd.DataFrame(data={"sim": euc_dists, "idx": euc_dists.index})
 
         jac_coeffs = df_disc.apply(jac_coeff, axis=1)
         df_disc_jac = pd.DataFrame(data={"match": jac_coeffs, "idx": jac_coeffs.index})
 
+        euc_dists = df_cont.apply(euc_dist, axis=1)
+        df_cont_dist = pd.DataFrame(data={"dist": euc_dists, "idx": euc_dists.index})
+
+        # We want the minimum non-zero distance to be ~= 0.01; 0.01 = min_dist**power
+        df_cont_dist_gt_0 = df_cont_dist[abs(df_cont_dist['dist'] - 0.0) > 0.1 ** 100]
+        power = mp.log(0.01) / mp.log(df_cont_dist_gt_0['dist'].min())
+        df_cont_dist["dist"] = df_cont_dist["dist"] ** power
+
+        # Compute a weighted-average similarity score from the discrete and continuous scores
         df_combined = pd.merge(df_cont_dist, df_disc_jac, on='idx')
-        averaged_sim = df_combined.apply(lambda row: round(row['sim'] * (len(cols_cont) / len(df_obs.columns)) +
-                                                           row['match'] * (len(cols_disc) / len(df_obs.columns)), 2),
+        idx = list(df_combined['idx'])
+        averaged_sim = df_combined.apply(lambda row: round(row['dist'] * (len(cols_cont) / len(df.columns)) +
+                                                           row['match'] * (len(cols_disc) / len(df.columns)), 5),
                                          axis=1)
-        df_combined = pd.DataFrame(data={"sim": averaged_sim, "idx": averaged_sim.index})
+        df_combined = pd.DataFrame(data={"sim": averaged_sim, "idx": idx})
         df_combined.sort_values(by="sim", ascending=False, inplace=True)
 
-        print(df_combined)
+        # Create a new dataframe with the SubSpace observations sorted by similarity score
+        df_with_sim = pd.DataFrame()
+        for i in range(len(df_combined)):
+            idx_original = int(df_combined.iloc[i]["idx"])
+            sim = df_combined.iloc[i]["sim"]
+            df_with_sim = df_with_sim.append(df.loc[idx_original])
+            df_with_sim.loc[idx_original, "sim"] = sim
+        df_with_sim = df_with_sim[vars_sorted + [Y, 'sim']]
 
-        k_closest_obs = pd.DataFrame()
-        for i in range(0, k):
-            idx_original = df_combined.iloc[i]["idx"]
-            k_closest_obs = k_closest_obs.append(df.loc[int(idx_original)])
+        # Weight the target variable predictions based on the similarity score to produce a weighted-avg expectation
+        sim_sum = df_with_sim['sim'].sum()
+        for i, row in df_with_sim.iterrows():
+            df_with_sim.loc[i, Y + "_wsim"] = row[Y] * row['sim'] / sim_sum
 
-        return k_closest_obs
+        return df_with_sim
 
-    def deterministic(self, cf, rv_list=[]):
+    def deterministic(self, unit, cf, target_rv):
         """Computes a deterministic query at the unit-level.
         A SEM is required, as it represents the mechanism by which each variable obtains its value.
         Pertains to a single unit of the population in which we know the value of every relevant variables.
 
-        :param cf: The counterfactual(s) to be computed.
-            Ex. "What would Y be if X were 1?" -> cf = {"X": 1}
-        :param rv_list: The desired consequence(s) of the counterfactual.
-            If empty, all RVs in the model are computed using the numpy and the SEM's system of linear equations.
-            Ex. "What "What would Y be if X were 1?" -> rv_list = ["Y"]
+        :param cf: the counterfactual(s) to be computed; a tuple
+            Ex. "What would Y be if X were 1?" -> cf = ("X", 1)
+        :param target_rv: an RV target to output (the consequent); a String (RV name)
+            Ex. "What "What would Y be if X were 1?" -> target_rv = "Y"
+            TODO If empty, all RVs in the model are computed using the numpy and the SEM's system of linear equations.
         :return:
         """
-        self.check_sem()  # Need a fully specified SEM
+        self.make_sem()  # Need a fully specified SEM
+        u_sem = self.make_u_sem()
 
-        # Check invertibility -- have a method in the SEM class for this ?
+        # TODO Check invertibility -- have a method in the SEM class for this ?
 
-        # 1. Use evidence (self.data) to determine the value of U.
+        # 1. Use evidence (self.data) to determine the value of U_v for each RV v in the SEM.
 
         # 2. Modify the model, M, by removing the structural equations for the variables in X and replacing them with
         # the appropriate functions X=x, to obtain the modified model, M_x.
@@ -152,8 +173,45 @@ class Counterfactual:
         self.check_u(u_space)
         pass
 
-    def act(self, rv, val):
-        self.data[rv] = val
+    # Returns a SEM modified to include U-vars (unit)
+    # X = U_X
+    # H = aX + U_H
+    # Y = bX + cH + U_Y
+    def make_u_sem(self):
+        u_sem = {}
+        for rv in self.rv_list:
+            eq = rv.forwardFunc
+            if len(rv.parentNames) == 0:  # If exogenous, U_X = X
+                u_sem[rv.name] = rv.name
+            else:  # If endogenous, U_X = X - F(X)
+                rhs = eq[(re.search(' = ', eq)).span()[1]:]
+                u_sem[rv.name] = rv.name + ' - ' + rhs
+        return u_sem
+
+    def solve_u_sem_with_cf(self, u_sem, unit, cf, target_rv):
+        u_sem_solved = {}
+        # Replace each RV in each equation with its observed value
+        for rv, eq in u_sem.items():  # For each RV equation in the U-SEM
+            def pad(s):
+                return ' ' + s + ' '  # Pad to ensure that substrings containing this RV name are skipped
+
+            for rv_term in u_sem.keys():  # For each RV term in this equation
+                eq = eq.replace(pad(rv_term), pad(unit[rv_term]))  # Replace the RV term with its observed value
+            u_sem_solved[rv] = exec(eq)
+
+        # Now that we have all the U-terms, we can solve for the target RV using the given counterfactual
+        eq_target = self.sem[target_rv] + ' + ' + u_sem_solved[target_rv]  # X = F(X) + U_X
+        for rv_term in u_sem.keys():
+            if rv_term == cf[0]:
+                eq_target = eq_target.replace(pad(rv_term), pad(cf[1]))
+            else:
+                eq_target = eq_target.replace(pad(rv_term), pad(unit[rv_term]))
+
+        return exec(eq_target)
+
+    def check_u(self, u_space=None):
+        if u_space is None:
+            raise Exception("A U-distribution is needed for probabilistic CF queries.")
 
     # Counterfactuals in linear models
     # Compute the effect of treatment on the treated
@@ -164,7 +222,6 @@ class Counterfactual:
         pass
 
     # Excess risk ratio
-
     # def ERR(self):
     #     pass
 
@@ -214,23 +271,3 @@ class Counterfactual:
     # Measures the extent to which the effect of X on Y is explained by X's effect on the mediator Q.
     def mediation(self):
         pass
-
-    # Determine whether this Counterfactual instance's rv_list contains a fully specified SEM.
-    def set_sem(self):
-        for rv in self.rv_list:
-            if rv.forwardFunc is None:
-                return False
-        return True
-
-    # Need a fully specified parametric model (SEM) to compute unit-level counterfactual queries.
-    # data: Need to have data for every key in SEM and vice versa.
-    def check_sem(self):
-        if not self.is_sem:
-            raise Exception("A fully specified SEM is needed for deterministic CF queries.")
-        rv_names = [rv.name for rv in self.rv_list]
-        if set(self.data.keys()) != set(rv_names):
-            raise Exception("A complete observation is needed for deterministic CF queries.")
-
-    def check_u(self, u_space=None):
-        if u_space is None:
-            raise Exception("A U-distribution is needed for probabilistic CF queries.")
