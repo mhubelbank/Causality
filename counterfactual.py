@@ -1,17 +1,14 @@
+from intervention import Intervention
+
+import os, sys, random, re
 from mpmath import mp
 import pandas as pd
 import numpy as np
 from sklearn import metrics
 from numpy.linalg import norm
-import re
 from numpy.random import normal
 np.random.seed(1)
-import random
 random.seed(1)
-from random import uniform
-import math
-
-from intervention import Intervention
 
 
 class Counterfactual:
@@ -31,7 +28,7 @@ class Counterfactual:
         self.sem = sem  # The SEM is a list of equations, structured the same as in the model files
         self.sem_dict = self.set_sem_dict()
 
-    def cf(self, X, Y, cf, pdf=False, conditional=None):
+    def closest_worlds(self, X, Y, cf, pdf=False, conditional=None):
         """Generates a distribution prediction of the target RV (Y) based on the counterfactual query and conditional
             clause, using the given unit observation (X) to find the "closest worlds" which will restrict the dataset
 
@@ -55,7 +52,7 @@ class Counterfactual:
         for i in range(len(deps)):
             dep = deps[i]
             if dep[0] < .5:
-                print('Rejecting variables due to independence from target(p-value, var): ', deps[i:])
+                # print('Rejecting variables due to independence from target(p-value, var): ', deps[i:])
                 break
             else:
                 vars.append(dep[1])
@@ -73,16 +70,16 @@ class Counterfactual:
         df = pd.DataFrame.from_dict(fs.ds)
         df_sim = self.find_similarity_scores(x_dict, Y, cf, df, list(reversed(vars)))
 
-        out = '\nE_weighted(' + str(Y) + ') with cf ' + str(cf[0]) + '=' + str(cf[1]) + ': ' + str(df_sim[Y + "_wsim"].sum())
+        out = 'E_weighted(' + str(Y) + ') with cf ' + str(cf[0]) + '=' + str(cf[1]) + ': ' + str(df_sim[Y + "_wsim"].sum())
         if pdf:
             dist = fs.distr(Y)
-            out += '\nPDF Results (Unweighted):'
+            out += '\nPDF(' + str(Y) + '):'
             out += '\nE = ' + str(dist.E())
             out += '\nSt Dev = ' + str(dist.stDev())
             out += '\nSkew = ' + str(dist.skew())
             out += '\nKurtosis = ' + str(dist.kurtosis())
 
-        return out
+        print(out)
 
     def find_similarity_scores(self, x_dict, Y, cf, df, vars_sorted):
         score_cols = [col for col in df.columns if (col != cf[0] and col != Y)]
@@ -157,17 +154,17 @@ class Counterfactual:
         :return:
         """
         u_sem = self.make_u_sem()
-        return self.solve_u_sem_with_cf(u_sem, dict(X), Y, cf)
+        print('--> E(' + str(Y) + ') =', self.solve_u_sem_with_cf(u_sem, dict(X), Y, cf))
         # TODO Check invertibility -- have a method in the SEM class for this ?
 
     # Useful for non-invertible unit-level counterfactual queries.
-    # u_space: Probability space for exogenous "Universe" variables U. Provides nondeterminism; "represent[s] our
+    # u_space: Probability space for exogenous variables U. Provides nondeterminism; "represent[s] our
     # uncertainty as to the identity of the subject under consideration or, when the subject is known, what other
     # characteristics that subject has that might have bearing on our problem."
-    def probabilistic(self, cf, u_space=None, rv_list=[]):
-        self.check_sem()
+    def probabilistic(self, X, Y, cf, u_space):
+        if self.sem:
+            pass
         self.check_u(u_space)
-        pass
 
     def set_sem_dict(self):
         sem_dict = {}
@@ -202,13 +199,14 @@ class Counterfactual:
             def pad(s): return ' ' + s  # Pad to ensure that substrings containing this RV name are skipped
             for rv_term in u_sem.keys():  # For each RV term in this equation
                 eq = re.sub(rf'{rv_term}(?![A-Za-z0-9])', str(x_dict[rv_term]), eq)
-            print('U_'+rv+' =' + eq)
+            # print('U_'+rv+' =' + eq)
             u_sem_solved[rv] = eval(eq)
 
-        print(u_sem_solved)
+        # print(u_sem_solved)
 
         # Now that we have all the U-terms, we can solve for the target RV using the given counterfactual
         eq_target = str(self.sem_dict[Y]) + ' + ' + str(u_sem_solved[Y])  # X = F(X) + U_X
+        print('Computed Formula:', Y, '=', eq_target)
         for rv_term in u_sem.keys():
             if rv_term == cf[0]:
                 # eq_target = eq_target.replace(pad(rv_term), pad(str(cf[1])))
@@ -217,7 +215,7 @@ class Counterfactual:
                 # eq_target = eq_target.replace(pad(rv_term), pad(str(x_dict[rv_term])))
                 eq_target = re.sub(rf'{rv_term}(?![A-Za-z0-9])', str(x_dict[rv_term]), eq_target)
 
-        print(eq_target)
+        print('-->', Y, '=', eq_target)
         return eval(eq_target)
 
     def check_u(self, u_space=None):
